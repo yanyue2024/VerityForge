@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "rag-parser-sidecar"
+version = "0.1.9"
+description = "Lightweight document normalization sidecar for the RAG platform"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "httpx>=0.28,<1",
+  "lxml>=5,<7",
+  "openpyxl>=3.1,<4",
+  "pydantic>=2.10,<3",
+  "pymupdf>=1.25,<2",
+  "pypdf>=5,<7",
+  "python-docx>=1.1,<2",
+  "uvicorn>=0.34,<1",
+]
+
+[project.optional-dependencies]
+docling = [
+  "docling>=2.20",
+]
+test = [
+  "pytest>=8.3,<10",
+  "pytest-asyncio>=0.25,<2",
+  "ruff>=0.11,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/parser_sidecar"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

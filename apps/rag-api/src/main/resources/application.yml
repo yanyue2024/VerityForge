@@ -1,0 +1,131 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: rag-api
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/rag}
+    username: ${DATABASE_USERNAME:rag}
+    password: ${DATABASE_PASSWORD:rag}
+    hikari:
+      maximum-pool-size: 16
+      minimum-idle: 2
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  jooq:
+    sql-dialect: postgres
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:disabled}
+      base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+      chat:
+        options:
+          model: ${OPENAI_CHAT_MODEL:gpt-5}
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+
+management:
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        rag.run: true
+        rag.retrieval: true
+        rag.retrieval.hybrid: true
+        rag.model.request: true
+        rag.agent.stage: true
+        rag.evaluation.notification: true
+  otlp:
+    metrics:
+      export:
+        enabled: ${RAG_OTLP_METRICS_ENABLED:false}
+        url: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:http://localhost:4318/v1/metrics}
+        step: ${RAG_OTLP_METRICS_STEP:15s}
+  logging:
+    export:
+      otlp:
+        enabled: ${RAG_OTLP_LOGGING_ENABLED:false}
+  tracing:
+    sampling:
+      probability: ${RAG_TRACE_SAMPLE_PROBABILITY:0.1}
+    export:
+      otlp:
+        enabled: ${RAG_OTLP_TRACING_ENABLED:false}
+  opentelemetry:
+    resource-attributes:
+      service.namespace: rag-platform
+      deployment.environment: ${RAG_DEPLOYMENT_ENVIRONMENT:local}
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+rag:
+  routing:
+    profile: ${RAG_AUTO_ROUTER_PROFILE:RETRIEVAL_AWARE_50}
+  storage:
+    endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://localhost:9000}
+    region: ${MINIO_REGION:us-east-1}
+    access-key: ${MINIO_ACCESS_KEY:ragadmin}
+    secret-key: ${MINIO_SECRET_KEY:ragadmin123}
+    bucket: ${MINIO_BUCKET:rag-assets}
+    connect-timeout-seconds: ${RAG_STORAGE_CONNECT_TIMEOUT_SECONDS:3}
+    attempt-timeout-seconds: ${RAG_STORAGE_ATTEMPT_TIMEOUT_SECONDS:10}
+    request-timeout-seconds: ${RAG_STORAGE_REQUEST_TIMEOUT_SECONDS:30}
+  auth:
+    jwt-secret: ${RAG_JWT_SECRET:local-development-secret-change-before-production}
+    token-ttl-seconds: ${RAG_JWT_TTL_SECONDS:28800}
+    allowed-origins: ${RAG_ALLOWED_ORIGINS:http://localhost:*,http://127.0.0.1:*}
+  bootstrap:
+    admin-username: ${RAG_BOOTSTRAP_ADMIN_USERNAME:admin}
+    admin-password: ${RAG_BOOTSTRAP_ADMIN_PASSWORD:admin123!}
+    admin-display-name: ${RAG_BOOTSTRAP_ADMIN_DISPLAY_NAME:Administrator}
+  credentials:
+    active-key-id: ${RAG_CREDENTIAL_ACTIVE_KEY_ID:primary}
+    master-key: ${RAG_CREDENTIAL_MASTER_KEY:}
+    decryption-keys: ${RAG_CREDENTIAL_DECRYPTION_KEYS:}
+  models:
+    active-language-model-profile-id: ${RAG_ACTIVE_LANGUAGE_MODEL_PROFILE_ID:}
+    probe-connect-timeout-seconds: ${RAG_MODEL_PROBE_CONNECT_TIMEOUT_SECONDS:10}
+    probe-request-timeout-seconds: ${RAG_MODEL_PROBE_REQUEST_TIMEOUT_SECONDS:60}
+    inference-connect-timeout-seconds: ${RAG_MODEL_INFERENCE_CONNECT_TIMEOUT_SECONDS:10}
+    inference-request-timeout-seconds: ${RAG_MODEL_INFERENCE_REQUEST_TIMEOUT_SECONDS:90}
+    proxy-url: ${RAG_MODEL_PROXY_URL:}
+    no-proxy-hosts: ${RAG_MODEL_NO_PROXY_HOSTS:localhost,127.0.0.1,::1,postgres,redis,minio,model-sidecar,parser-sidecar}
+    structured-max-tokens: ${RAG_MODEL_STRUCTURED_MAX_TOKENS:2200}
+    structured-reasoning-effort: ${RAG_MODEL_STRUCTURED_REASONING_EFFORT:}
+  agentic:
+    deep-read-strategy: ${RAG_AGENTIC_DEEP_READ_STRATEGY:GOAL_BATCHED_PARENT}
+  evaluation:
+    agentic-retrieval-parallelism: ${RAG_EVALUATION_AGENTIC_RETRIEVAL_PARALLELISM:2}
+    notifications:
+      initial-delay-ms: ${RAG_EVALUATION_NOTIFICATION_INITIAL_DELAY_MS:15000}
+      poll-ms: ${RAG_EVALUATION_NOTIFICATION_POLL_MS:10000}
+      stale-after-seconds: ${RAG_EVALUATION_NOTIFICATION_STALE_AFTER_SECONDS:120}
+      connect-timeout-seconds: ${RAG_EVALUATION_NOTIFICATION_CONNECT_TIMEOUT_SECONDS:3}
+      request-timeout-seconds: ${RAG_EVALUATION_NOTIFICATION_REQUEST_TIMEOUT_SECONDS:10}
+      allow-private-addresses: ${RAG_EVALUATION_NOTIFICATION_ALLOW_PRIVATE_ADDRESSES:false}
+
+logging:
+  level:
+    org.jooq.tools.LoggerListener: WARN

@@ -1,0 +1,375 @@
+name: rag-platform
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+      POSTGRES_USER: ${POSTGRES_USER:-rag}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag} -d ${POSTGRES_DB:-rag}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ragadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ragadmin123}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${MINIO_API_CORS_ALLOW_ORIGIN:-http://localhost:5173,http://127.0.0.1:5173}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  minio-init:
+    image: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
+        mc mb --ignore-existing "local/$${MINIO_BUCKET}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-ragadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-ragadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-rag-assets}
+
+  parser-sidecar:
+    build:
+      context: ./parser-sidecar
+    environment:
+      PARSER_LOG_LEVEL: INFO
+    ports:
+      - "${PARSER_SIDECAR_PORT:-8090}:8090"
+
+  model-sidecar:
+    build:
+      context: ./model-sidecar
+    environment:
+      EMBED_MODEL_PATH: /models/embedding
+      RERANK_MODEL_PATH: /models/reranker
+      EMBED_MODEL_NAME: ${BGE_EMBED_MODEL_NAME:-BAAI/bge-m3}
+      RERANK_MODEL_NAME: BAAI/bge-reranker-v2-m3
+      EMBED_DIMENSION: ${BGE_EMBED_DIMENSION:-1024}
+      EMBED_MAX_LENGTH: 8192
+      EMBED_BATCH_SIZE: 8
+      MODEL_DEVICE: cuda
+      MODEL_PRELOAD: "true"
+      NVIDIA_VISIBLE_DEVICES: ${MODEL_SIDECAR_GPU:-0}
+    volumes:
+      - ${BGE_EMBED_MODEL_PATH:-./.runtime/models/embedding}:/models/embedding:ro
+      - ${BGE_RERANK_MODEL_PATH:-./.runtime/models/reranker}:/models/reranker:ro
+    ports:
+      - "${MODEL_SIDECAR_PORT:-18091}:8091"
+    gpus: all
+    shm_size: "2gb"
+    restart: unless-stopped
+    profiles: ["models", "full"]
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.java
+      args:
+        APP_NAME: rag-api
+        APP_JAR: apps/rag-api/target/rag-api-0.1.0-SNAPSHOT.jar
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_USERNAME: ${POSTGRES_USER:-rag}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-http://localhost:5173}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-ragadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ragadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-rag-assets}
+      RAG_STORAGE_CONNECT_TIMEOUT_SECONDS: ${RAG_STORAGE_CONNECT_TIMEOUT_SECONDS:-3}
+      RAG_STORAGE_ATTEMPT_TIMEOUT_SECONDS: ${RAG_STORAGE_ATTEMPT_TIMEOUT_SECONDS:-10}
+      RAG_STORAGE_REQUEST_TIMEOUT_SECONDS: ${RAG_STORAGE_REQUEST_TIMEOUT_SECONDS:-30}
+      RAG_JWT_SECRET: ${RAG_JWT_SECRET:-local-development-secret-change-before-production}
+      RAG_CREDENTIAL_MASTER_KEY: ${RAG_CREDENTIAL_MASTER_KEY:?Set RAG_CREDENTIAL_MASTER_KEY}
+      RAG_CREDENTIAL_ACTIVE_KEY_ID: ${RAG_CREDENTIAL_ACTIVE_KEY_ID:-primary}
+      RAG_CREDENTIAL_DECRYPTION_KEYS: ${RAG_CREDENTIAL_DECRYPTION_KEYS:-}
+      RAG_ACTIVE_LANGUAGE_MODEL_PROFILE_ID: ${RAG_ACTIVE_LANGUAGE_MODEL_PROFILE_ID:-}
+      RAG_AUTO_ROUTER_PROFILE: ${RAG_AUTO_ROUTER_PROFILE:-RETRIEVAL_AWARE_50}
+      RAG_MODEL_STRUCTURED_MAX_TOKENS: ${RAG_MODEL_STRUCTURED_MAX_TOKENS:-2200}
+      RAG_MODEL_PROXY_URL: ${RAG_MODEL_PROXY_URL:-}
+      RAG_MODEL_NO_PROXY_HOSTS: ${RAG_MODEL_NO_PROXY_HOSTS:-localhost,127.0.0.1,::1,postgres,redis,minio,model-sidecar,parser-sidecar}
+      RAG_AGENTIC_DEEP_READ_STRATEGY: ${RAG_AGENTIC_DEEP_READ_STRATEGY:-GOAL_BATCHED_PARENT}
+      RAG_EVALUATION_AGENTIC_RETRIEVAL_PARALLELISM: ${RAG_EVALUATION_AGENTIC_RETRIEVAL_PARALLELISM:-4}
+      RAG_EVALUATION_NOTIFICATION_INITIAL_DELAY_MS: ${RAG_EVALUATION_NOTIFICATION_INITIAL_DELAY_MS:-15000}
+      RAG_EVALUATION_NOTIFICATION_POLL_MS: ${RAG_EVALUATION_NOTIFICATION_POLL_MS:-10000}
+      RAG_EVALUATION_NOTIFICATION_STALE_AFTER_SECONDS: ${RAG_EVALUATION_NOTIFICATION_STALE_AFTER_SECONDS:-120}
+      RAG_EVALUATION_NOTIFICATION_CONNECT_TIMEOUT_SECONDS: ${RAG_EVALUATION_NOTIFICATION_CONNECT_TIMEOUT_SECONDS:-3}
+      RAG_EVALUATION_NOTIFICATION_REQUEST_TIMEOUT_SECONDS: ${RAG_EVALUATION_NOTIFICATION_REQUEST_TIMEOUT_SECONDS:-10}
+      RAG_EVALUATION_NOTIFICATION_ALLOW_PRIVATE_ADDRESSES: ${RAG_EVALUATION_NOTIFICATION_ALLOW_PRIVATE_ADDRESSES:-false}
+      RAG_ALLOWED_ORIGINS: ${RAG_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      RAG_BOOTSTRAP_ADMIN_USERNAME: ${RAG_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      RAG_BOOTSTRAP_ADMIN_PASSWORD: ${RAG_BOOTSTRAP_ADMIN_PASSWORD:-admin123!}
+      RAG_BOOTSTRAP_ADMIN_DISPLAY_NAME: ${RAG_BOOTSTRAP_ADMIN_DISPLAY_NAME:-Administrator}
+      RAG_DEPLOYMENT_ENVIRONMENT: ${RAG_DEPLOYMENT_ENVIRONMENT:-local}
+      RAG_TRACE_SAMPLE_PROBABILITY: ${RAG_TRACE_SAMPLE_PROBABILITY:-0.1}
+      RAG_OTLP_TRACING_ENABLED: ${RAG_OTLP_TRACING_ENABLED:-false}
+      RAG_OTLP_METRICS_ENABLED: ${RAG_OTLP_METRICS_ENABLED:-false}
+      RAG_OTLP_LOGGING_ENABLED: ${RAG_OTLP_LOGGING_ENABLED:-false}
+      RAG_OTLP_METRICS_STEP: ${RAG_OTLP_METRICS_STEP:-15s}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-http://otel-collector:4318/v1/metrics}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-disabled}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5}
+    ports:
+      - "${RAG_API_PORT:-8080}:8080"
+    restart: unless-stopped
+    stop_grace_period: 75s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["app"]
+
+  rag-worker:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.java
+      args:
+        APP_NAME: rag-worker
+        APP_JAR: apps/rag-worker/target/rag-worker-0.1.0-SNAPSHOT.jar
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      parser-sidecar:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-rag}
+      DATABASE_USERNAME: ${POSTGRES_USER:-rag}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-rag}
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_WORKER_PUBLIC_ENDPOINT:-http://minio:9000}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-ragadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ragadmin123}
+      MINIO_BUCKET: ${MINIO_BUCKET:-rag-assets}
+      RAG_STORAGE_CONNECT_TIMEOUT_SECONDS: ${RAG_STORAGE_CONNECT_TIMEOUT_SECONDS:-3}
+      RAG_STORAGE_ATTEMPT_TIMEOUT_SECONDS: ${RAG_STORAGE_ATTEMPT_TIMEOUT_SECONDS:-10}
+      RAG_STORAGE_REQUEST_TIMEOUT_SECONDS: ${RAG_STORAGE_REQUEST_TIMEOUT_SECONDS:-30}
+      RAG_CREDENTIAL_MASTER_KEY: ${RAG_CREDENTIAL_MASTER_KEY:?Set RAG_CREDENTIAL_MASTER_KEY}
+      RAG_CREDENTIAL_ACTIVE_KEY_ID: ${RAG_CREDENTIAL_ACTIVE_KEY_ID:-primary}
+      RAG_CREDENTIAL_DECRYPTION_KEYS: ${RAG_CREDENTIAL_DECRYPTION_KEYS:-}
+      RAG_MODEL_PROXY_URL: ${RAG_MODEL_PROXY_URL:-}
+      RAG_MODEL_NO_PROXY_HOSTS: ${RAG_MODEL_NO_PROXY_HOSTS:-localhost,127.0.0.1,::1,postgres,redis,minio,model-sidecar,parser-sidecar}
+      PARSER_SIDECAR_URL: ${PARSER_SIDECAR_URL:-http://parser-sidecar:8090}
+      RAG_INGESTION_STREAM: ${RAG_INGESTION_STREAM:-rag:ingestion}
+      RAG_INGESTION_CONSUMER_GROUP: ${RAG_INGESTION_CONSUMER_GROUP:-rag-workers}
+      RAG_INGESTION_CONSUMER_NAME: ${RAG_INGESTION_CONSUMER_NAME:-worker-main}
+      RAG_INGESTION_CLAIM_IDLE_MS: ${RAG_INGESTION_CLAIM_IDLE_MS:-30000}
+      RAG_INGESTION_CLAIM_BATCH_SIZE: ${RAG_INGESTION_CLAIM_BATCH_SIZE:-4}
+      RAG_INGESTION_STALE_AFTER_SECONDS: ${RAG_INGESTION_STALE_AFTER_SECONDS:-300}
+      RAG_INGESTION_HEARTBEAT_INTERVAL_SECONDS: ${RAG_INGESTION_HEARTBEAT_INTERVAL_SECONDS:-30}
+      RAG_INGESTION_NORMALIZED_ARTIFACT_REUSE_ENABLED: ${RAG_INGESTION_NORMALIZED_ARTIFACT_REUSE_ENABLED:-true}
+      RAG_GOVERNANCE_EXPIRATION_SCAN_INTERVAL_MS: ${RAG_GOVERNANCE_EXPIRATION_SCAN_INTERVAL_MS:-60000}
+      RAG_GOVERNANCE_VERSION_RETENTION_DAYS: ${RAG_GOVERNANCE_VERSION_RETENTION_DAYS:-30}
+      RAG_GOVERNANCE_CLEANUP_BATCH_SIZE: ${RAG_GOVERNANCE_CLEANUP_BATCH_SIZE:-50}
+      RAG_GOVERNANCE_CLEANUP_INITIAL_DELAY_MS: ${RAG_GOVERNANCE_CLEANUP_INITIAL_DELAY_MS:-120000}
+      RAG_GOVERNANCE_CLEANUP_DELAY_MS: ${RAG_GOVERNANCE_CLEANUP_DELAY_MS:-86400000}
+      RAG_DEPLOYMENT_ENVIRONMENT: ${RAG_DEPLOYMENT_ENVIRONMENT:-local}
+      RAG_TRACE_SAMPLE_PROBABILITY: ${RAG_TRACE_SAMPLE_PROBABILITY:-0.1}
+      RAG_OTLP_TRACING_ENABLED: ${RAG_OTLP_TRACING_ENABLED:-false}
+      RAG_OTLP_METRICS_ENABLED: ${RAG_OTLP_METRICS_ENABLED:-false}
+      RAG_OTLP_LOGGING_ENABLED: ${RAG_OTLP_LOGGING_ENABLED:-false}
+      RAG_OTLP_METRICS_STEP: ${RAG_OTLP_METRICS_STEP:-15s}
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:-http://otel-collector:4318/v1/traces}
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:-http://otel-collector:4318/v1/metrics}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-disabled}
+      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-5}
+    restart: unless-stopped
+    stop_grace_period: 75s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["app"]
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    depends_on:
+      rag-api:
+        condition: service_healthy
+    environment:
+      RAG_API_UPSTREAM: http://rag-api:8080
+      RAG_STORAGE_UPSTREAM: http://minio:9000
+    ports:
+      - "${WEB_PORT:-5173}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    stop_grace_period: 20s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["app"]
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles: ["local-models"]
+
+  tempo:
+    image: grafana/tempo:3.0.2
+    command: ["-target=all", "-config.file=/etc/tempo/tempo.yml"]
+    volumes:
+      - ./deploy/observability/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    ports:
+      - "127.0.0.1:${TEMPO_PORT:-3200}:3200"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["observability"]
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.156.0
+    command: ["--config=/etc/otelcol-contrib/config.yml"]
+    depends_on:
+      - tempo
+    volumes:
+      - ./deploy/observability/otel-collector.yml:/etc/otelcol-contrib/config.yml:ro
+    ports:
+      - "127.0.0.1:${OTEL_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTEL_HTTP_PORT:-4318}:4318"
+      - "127.0.0.1:${OTEL_HEALTH_PORT:-13133}:13133"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["observability"]
+
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=10GB
+      - --web.enable-lifecycle
+      - --web.enable-remote-write-receiver
+      - --enable-feature=exemplar-storage
+    depends_on:
+      - otel-collector
+      - alertmanager
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["observability"]
+
+  alertmanager:
+    image: prom/alertmanager:v0.33.1
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - ./deploy/observability/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_PORT:-9093}:9093"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["observability"]
+
+  grafana:
+    image: grafana/grafana:13.1.0
+    depends_on:
+      - prometheus
+      - tempo
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-change-me-before-enabling-observability}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_DISABLED: "true"
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000}
+    volumes:
+      - ./deploy/observability/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/observability/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./deploy/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    profiles: ["observability"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  ollama_data:
+  tempo_data:
+  prometheus_data:
+  alertmanager_data:
+  grafana_data:

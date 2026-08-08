@@ -1,0 +1,33 @@
+VerityForge Viewing and Learning License
+Version 1.0, 2026-08-08
+
+Copyright (c) 2026 Yanyue
+
+Permission is granted, free of charge, to any person obtaining a copy of the
+VerityForge source code and documentation (the "Materials") to read, inspect,
+study, quote short excerpts with attribution, and run or privately modify a
+copy solely as necessary for personal, non-commercial evaluation and learning.
+
+The permission above does not include the right to:
+
+1. redistribute, mirror, sublicense, sell, or publish the Materials or a
+   substantial portion of them;
+2. deploy the Materials or a derivative work as a public or hosted service;
+3. use the Materials or a derivative work for commercial purposes; or
+4. incorporate the Materials or a substantial portion of them into another
+   product, library, model, dataset, or service.
+
+Any public quotation or educational reference must identify VerityForge and
+link to the original repository. Separate third-party works, dependencies,
+and datasets included with or referenced by this repository remain governed by
+their own licenses and notices. In particular, see THIRD_PARTY_NOTICES.md and
+test_data/RAG-Multi-Corpus/LICENSE.
+
+The Materials are provided "AS IS", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose, and noninfringement. In no event shall the
+copyright holder be liable for any claim, damages, or other liability arising
+from the Materials or their use.
+
+All rights not expressly granted above are reserved. Written permission for a
+broader use may be requested from the copyright holder.

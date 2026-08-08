@@ -1,0 +1,26 @@
+[Unit]
+Description=Yanyue RAG API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@ROOT@
+EnvironmentFile=@ROOT@/.env
+ExecStart=@ROOT@/.tools/jdk/bin/java --enable-native-access=ALL-UNNAMED -jar @ROOT@/.runtime/current/rag-api.jar
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=75
+SuccessExitStatus=143
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/tmp
+UMask=0077
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,82 @@
+groups:
+  - name: rag-platform-availability
+    rules:
+      - alert: RagTelemetryCollectorUnavailable
+        expr: up{job="otel-collector-internal"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: RAG telemetry collector is unavailable
+          description: Prometheus cannot scrape the OpenTelemetry Collector internal endpoint.
+
+      - alert: RagApiTelemetryMissing
+        expr: absent_over_time(jvm_info{service_name="rag-api"}[5m])
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG API telemetry has stopped
+          description: No rag-api OTLP metrics have been observed for five minutes.
+
+      - alert: RagWorkerTelemetryMissing
+        expr: absent_over_time(jvm_info{service_name="rag-worker"}[5m])
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG Worker telemetry has stopped
+          description: No rag-worker OTLP metrics have been observed for five minutes.
+
+  - name: rag-platform-runtime
+    rules:
+      - alert: RagRunErrorRatioHigh
+        expr: |
+          sum(rate(rag_run_total{outcome="error"}[10m]))
+            / clamp_min(sum(rate(rag_run_total[10m])), 0.001) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: RAG Run error ratio is elevated
+          description: More than 10 percent of observed Runs have failed during the last ten minutes.
+
+      - alert: RagModelErrorRatioHigh
+        expr: |
+          sum(rate(rag_model_request_total{outcome="error"}[10m]))
+            / clamp_min(sum(rate(rag_model_request_total[10m])), 0.001) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Model request error ratio is elevated
+          description: More than 10 percent of observed model requests have failed during the last ten minutes.
+
+      - alert: RagIngestionErrorsObserved
+        expr: |
+          increase(rag_ingestion_stage_total{outcome="error"}[10m]) > 0
+          or increase(rag_ingestion_stream_processing_error_total[10m]) > 0
+          or increase(rag_ingestion_outbox_publish_error_total[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: Knowledge ingestion errors were observed
+          description: A Worker stage, Redis Stream message, or Outbox publication failed in the last ten minutes.
+
+      - alert: RagJvmHeapPressureHigh
+        expr: |
+          sum by (service_name) (jvm_memory_used_bytes{area="heap"})
+            / clamp_min(sum by (service_name) (jvm_memory_max_bytes{area="heap"}), 1) > 0.90
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: JVM heap pressure is high for {{ $labels.service_name }}
+          description: Heap use has remained above 90 percent for ten minutes.
+
+      - alert: RagDatabasePoolWaiting
+        expr: hikaricp_connections_pending > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Database connection pool has waiting callers
+          description: At least one caller has waited for a HikariCP connection for five minutes.

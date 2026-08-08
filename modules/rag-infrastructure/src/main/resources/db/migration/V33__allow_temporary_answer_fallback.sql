@@ -1,0 +1,10 @@
+ALTER TABLE rag_run DROP CONSTRAINT IF EXISTS ck_rag_run_answer_mode;
+
+ALTER TABLE rag_run ADD CONSTRAINT ck_rag_run_answer_mode CHECK (
+    answer_mode IS NULL OR answer_mode IN (
+        'GROUNDED', 'PARTIAL_GROUNDED', 'CONVERSATIONAL',
+        'GENERAL_KNOWLEDGE', 'NO_ENTERPRISE_EVIDENCE',
+        'TEMPORARILY_UNAVAILABLE',
+        'ANSWER_WITH_EVIDENCE', 'NO_EVIDENCE'
+    )
+);
