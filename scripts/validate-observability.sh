@@ -12,7 +12,12 @@ fi
 
 command -v docker >/dev/null || { echo "docker is required" >&2; exit 1; }
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
-command -v rg >/dev/null || { echo "ripgrep is required" >&2; exit 1; }
+
+if command -v rg >/dev/null; then
+  duplicate_counter_search=(rg -n)
+else
+  duplicate_counter_search=(grep -n)
+fi
 
 export BGE_EMBED_MODEL_PATH="${BGE_EMBED_MODEL_PATH:-/tmp/rag-embed-model}"
 export BGE_RERANK_MODEL_PATH="${BGE_RERANK_MODEL_PATH:-/tmp/rag-rerank-model}"
@@ -29,7 +34,7 @@ jq -e '
   and all(.panels[]; .datasource.uid == "rag-prometheus")
 ' "${OBS_DIR}/grafana/dashboards/rag-platform-overview.json" >/dev/null
 
-if rg -n '_total_total' "${OBS_DIR}/alerts.yml" \
+if "${duplicate_counter_search[@]}" '_total_total' "${OBS_DIR}/alerts.yml" \
   "${OBS_DIR}/grafana/dashboards/rag-platform-overview.json"; then
   echo "OTLP counters already carry one _total suffix; remove the duplicate suffix above" >&2
   exit 1
