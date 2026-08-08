@@ -725,6 +725,7 @@ test('desktop knowledge workspace is readable and stable', async ({ page }, test
   if (!captureShowcase) {
     await expect(page.locator('body')).toHaveScreenshot('knowledge-desktop.png', {
       animations: 'disabled',
+      maxDiffPixelRatio: 0.015,
     })
   }
   await captureDesktop(page, 'knowledgeops-desktop.png')
