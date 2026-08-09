@@ -312,7 +312,7 @@ const showcaseRunSummaries = [
   {
     id: showcaseFastRun.id,
     datasetId: showcaseDataset.id,
-    name: 'V8 FINAL · Fast',
+    name: '完整链路 · Fast',
     datasetName: showcaseDataset.name,
     status: showcaseFastRun.status,
     mode: 'FAST',
@@ -326,7 +326,7 @@ const showcaseRunSummaries = [
   {
     id: showcaseDeepRun.id,
     datasetId: showcaseDataset.id,
-    name: 'V8 FINAL · Deep',
+    name: '完整链路 · Deep',
     datasetName: showcaseDataset.name,
     status: showcaseDeepRun.status,
     mode: 'DEEP',
@@ -348,7 +348,7 @@ function showcaseResults(run: typeof showcaseFastRun | typeof showcaseDeepRun) {
     question: ['组织权限如何影响检索结果？', '如何判断索引是否可发布？', '多目标问题如何补齐证据？', '回答中的引用如何定位原文？', 'Fast 与 Deep 应如何选择？'][index],
     expectedAnswer: '基于版本化证据给出可追溯结论。',
     expectedDocumentIds: [documents[0].id],
-    caseMetadata: { benchmark: 'v8-final', position: index + 1 },
+    caseMetadata: { benchmark: 'deep-final', position: index + 1 },
     metrics: {
       recallAt5: deep ? 1 : index === 0 ? 1 : 0,
       acceptedEvidenceCoverage: deep ? [0.9669, 0.9624, 0.9362, 0.9348, 0.9595][index] : null,
@@ -966,7 +966,7 @@ test('evaluation workspace restores a persisted run', async ({ page }) => {
 
   await expect(page.getByText('检索回归集').first()).toBeVisible()
   await page.getByText(evaluationRunSummary.name).click()
-  await expect(page.getByText('Recall@5')).toBeVisible()
+  await expect(page.getByText('Recall@5').first()).toBeVisible()
   await expect(page.getByText('100%').first()).toBeVisible()
   await expect(page.getByText('发布流程包含哪些阶段？')).toBeVisible()
 

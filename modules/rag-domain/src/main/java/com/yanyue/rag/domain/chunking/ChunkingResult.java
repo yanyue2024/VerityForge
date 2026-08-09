@@ -1,6 +1,6 @@
 package com.yanyue.rag.domain.chunking;
 
-import com.yanyue.rag.domain.chunking.v4.ChunkSourceMap;
+import com.yanyue.rag.domain.chunking.ChunkSourceMap;
 import com.yanyue.rag.domain.knowledge.Chunk;
 import java.util.List;
 import java.util.Map;

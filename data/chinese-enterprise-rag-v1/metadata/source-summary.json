@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "chinese-enterprise-rag-summary/v1",
+  "datasetId": "chinese-enterprise-rag-v1",
+  "documentCount": 200,
+  "evaluationCaseCount": 440,
+  "formats": {
+    "pdf": 50,
+    "docx": 50,
+    "html": 50,
+    "md": 50
+  },
+  "sources": {
+    "openeuler": 50,
+    "kubernetes": 50,
+    "ant-design": 50,
+    "apache-doris": 50
+  },
+  "sourceFormatMatrix": {
+    "openeuler": {
+      "pdf": 13,
+      "docx": 13,
+      "html": 12,
+      "md": 12
+    },
+    "kubernetes": {
+      "pdf": 12,
+      "docx": 13,
+      "html": 13,
+      "md": 12
+    },
+    "ant-design": {
+      "pdf": 12,
+      "docx": 12,
+      "html": 13,
+      "md": 13
+    },
+    "apache-doris": {
+      "pdf": 13,
+      "docx": 12,
+      "html": 12,
+      "md": 13
+    }
+  }
+}

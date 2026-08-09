@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>对接 libvirt</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">对接 libvirt</h1>
+</header>
+<h1 id="对接-libvirt">对接 libvirt</h1><p>[[toc]]</p><h2 id="概述">概述</h2><p>libvirt 是一个管理 hypervisor 的上层软件，它通过不同的驱动统一管理不同类型的 hypervisor ，并对外提供统一、稳定的应用程序接口。</p><p>在云场景中，业内广泛使用 libvirt 管理大规模的虚拟机。为了方便地对大规模的 StratoVirt 虚拟机进行部署、编排和管理，StratoVirt 标准虚拟化支持对接 libvirt，打通了 libvirt 北向接口。用户可以通过 libvirt 对应的 XML 文件描述一个虚拟机，包括虚拟机名称、CPU、磁盘等。</p><p>本章介绍 StratoVirt 平台支持的 XML 配置，以及如何使用 virsh 命令管理虚拟机。</p><h2 id="前提条件">前提条件</h2><p>StratoVirt 对接 libvirt，主机需要满足如下条件：</p><ul><li>已正确配置 yum 源</li><li>已正确安装并启动 libvirt</li><li>已正确安装 StratoVirt</li></ul><h2 id="虚拟机配置">虚拟机配置</h2><p>libvirt 工具采用 XML 格式的文件描述一个虚拟机特征，包括虚拟机名称、CPU、内存、磁盘、网卡等信息。用户可以通过修改配置文件，对虚拟机进行管理。</p><p>StratoVirt 对接 libvirt 之前，需要先配置 XML 文件。本小节介绍 StratoVirt 对接 libvirt 时支持的 XML 配置项以及配置方式。</p><blockquote><p><strong>说明</strong></p><p>使用 libvirt 管理 StratoVirt 虚拟机前，应该注意到 StratoVirt 当前支持的特性、特性之间的互斥关系、特性的配置前提条件、规格等，详细信息请参见命令行方式的 "虚拟机配置”章节。</p></blockquote><h3 id="虚拟机描述">虚拟机描述</h3><p>虚拟机 XML 文件必须包含描述虚拟机的最基本元素： domain 和 name 。</p><h4 id="元素介绍">元素介绍</h4><ul><li><p>domain ： 虚拟机配置的根元素，用于配置运行 StratoVirt 虚拟机的 hypervisor 类型。</p><p>属性 type ：domain 的类型，在 StratoVirt 虚拟化中，该值为 kvm 。</p></li><li><p>name ：虚拟机名称。</p></li></ul><p>虚拟机名称是一个长度不超过 255 字符的字符串。同一个主机上的虚拟机名称不能重复，虚拟机名称必须由数字、字母、“_”、“－”、“:” 组成。</p><h4 id="配置示例">配置示例</h4><p>假设配置虚拟机名称为 StratoVirt ，示例为：</p><pre class="shell"><code>
+    StratoVirt
+    ...
+</code></pre><h3 id="虚拟cpu和内存">虚拟CPU和内存</h3><p>本节介绍虚拟 CPU 和虚拟内存的配置。</p><h4 id="元素介绍-1">元素介绍</h4><ul><li><p>vcpu：虚拟处理器的个数。</p></li><li><p>memory：虚拟内存大小。</p><p>属性 unit ：指定内存单位，属性值支持 KiB（210 字节）、MiB（220 字节）、GiB（230 字节）、TiB（240 字节）等。</p><blockquote><p><strong>说明</strong></p><p>StratoVirt 暂不支持 CPU 拓扑结构，请勿配置该项。</p></blockquote></li></ul><h4 id="配置示例-1">配置示例</h4><p>配置 8GiB 内存，4 个虚拟处理器的示例如下：</p><div class="sourceCode" id="cb2"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    4</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>    8</span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>    ...</span></code></pre></div><h3 id="虚拟机设备">虚拟机设备</h3><p>本节介绍如何使用 XML 文件配置虚拟机设备：磁盘，网卡，rng，balloon，console，vsock 设备。</p><h4 id="磁盘">磁盘</h4><h6 id="元素介绍-2">元素介绍</h6><ul><li><p>属性 type ：指定后端存储介质类型，在 StratoVirt 虚拟化中，该值为 file 。</p><p>属性 device：呈现给虚拟机的存储介质类型，在 StratoVirt 虚拟化中，该值为 disk 。</p></li><li><p>driver：指定后端驱动的详细信息。</p><p>属性 type ：磁盘的格式类型，在 StratoVirt 虚拟化中，该值为 raw 。StratoVirt 当前只支持 raw 格式的磁盘。</p><p>属性 iothread：为磁盘配置 iothread ，取值为 iothread 编号。在配置磁盘的 iothread 之前，需使用 iothread 元素配置 iothread 的个数。</p></li><li><p>source： 指定后端存储介质。</p><p>属性 file：指定磁盘路径。</p></li><li><p>target：指定后端驱动的详细信息。</p><p>属性 dev：指定磁盘名称。</p><p>属性 bus：指定磁盘设备的类型，在 StratoVirt 虚拟化中，该值为 virtio 。</p></li><li><p>iotune： 指定磁盘 IO 特性。</p><p>属性 total_iops_sec：设置磁盘 iops 的值。</p></li><li><p>address：用于设置设备所要挂载的总线属性。</p><p>属性 type：总线类型，在 StratoVirt 虚拟化中，该值为 pci 。</p><p>属性 domain：虚拟机的域。</p><p>属性 bus：设备将要挂载的 bus 号。</p><p>属性 slot：设备将要挂载的 slot 号，取值范围为：[0, 31] 。</p><p>属性 function：设备将要挂载的 function 号，取值范围为：[0, 7] 。</p></li></ul><h6 id="配置示例-2">配置示例</h6><p>配置磁盘路径为：<code>/home/openEuler-21.09-stratovirt.img</code>，配置 1 个 iothread，并且磁盘 iothread 配置为 iothread1 ，iops 为 10000，并将其挂载在 bus 为 1、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb3"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a>    1</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>            10000</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>    ...</span></code></pre></div><h4 id="网络设备">网络设备</h4><h6 id="元素介绍-3">元素介绍</h6><ul><li><p>interface：网络接口</p><p>属性 type：指定网络设备类型。</p></li><li><p>mac：虚拟网卡地址</p><p>属性 address：虚拟网卡地址。</p></li><li><p>source： 指定后端网桥</p><p>属性 bridge：指定网桥。</p></li><li><p>target：指定后端网卡</p><p>属性 dev：指定后端的 tap 设备。</p></li><li><p>model： 虚拟网卡类型</p><p>属性 type： 虚拟网卡类型，在 StratoVirt 虚拟化中，该值为 virtio。</p></li><li><p>driver：用来指定是否开启 vhost 。</p><p>属性 name：如果设置 name 为 qemu 则使用 virtio-net 设备，如果不配置 driver 或者 name 值为 vhost ，则使用 vhost-net 设备。</p></li></ul><h6 id="配置示例-3">配置示例</h6><p>配置网络前请参考 配置linux网桥，配置好 Linux 网桥。配置 mac 地址为：<code>de:ad:be:ef:00:01</code>，网桥为配置好的 br0 ，使用 virtio-net 设备，并将其挂载在 bus 为 2、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb4"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        ...</span></code></pre></div><h4 id="balloon-设备">balloon 设备</h4><h6 id="元素介绍-4">元素介绍</h6><ul><li><p>memballoon：balloon 设备类型</p><p>属性 model ：指定 balloon 设备类型，在 StratoVirt 虚拟化中，该值为 virtio 。</p></li><li><p>alias：balloon 设备的别名</p><p>属性 name ：balloon 设备的 id 。</p><p>属性 autodeflate ：设置 auto deflate（自动收缩）特性，可选值为：<code>on</code> 、<code>off</code> 。</p></li></ul><h6 id="配置示例-4">配置示例</h6><p>配置 balloon 设备，开启 autodeflate 特性，并将其挂载在 bus 为 3、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb5"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>        ...</span></code></pre></div><h4 id="console-设备">console 设备</h4><p>由于 console 设备挂载在 virtio-serial 下的总线上，所以在创建 console 设备时，需要创建 virtio-serial 设备。</p><blockquote><p><strong>说明</strong></p><p>StratoVirt 的 console 设备暂时不支持多端口特性，每个虚拟机只能配置一个 console 设备。</p></blockquote><h6 id="元素介绍-5">元素介绍</h6><ul><li><p>controller：控制器</p><p>属性 type：控制器类型，此处值为 virtio-serial 。</p></li><li><p>alias：别名</p><p>属性 name：设备的 id。</p></li><li><p>console：console 设备</p><p>属性 type：指定 console 设备的重定向方式。支持的重定向方式有：pty ， file 和 unix 。</p></li><li><p>target：配置 console 设备。</p><p>属性 type：指定 console 设备类型，在 StratoVirt 虚拟化中，该值为 virtio 。</p></li></ul><h6 id="配置示例-5">配置示例</h6><p>配置重定向方式为 pty ，并将其挂载在 bus 为 4、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb6"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>        ...</span></code></pre></div><h4 id="rng-设备">rng 设备</h4><h6 id="元素介绍-6">元素介绍</h6><ul><li><p>rng：rng 设备</p><p>属性 model：指定 rng 设备类型，在 StratoVirt 虚拟化中，该值为 virtio 。</p></li><li><p>rate：rng 设备产生随机数速率</p><p>属性 period ：用于设置随机数产生周期，单位为毫秒，当前 StratoVirt 不支持设置周期值，默认值为1000毫秒，请将该值设置为1000。</p><p>属性 bytes ：周期内产生的最大字节数。</p></li><li><p>backend：设置 rng 设备后端，值为 host 中 rng 设备的路径</p><p>属性 model：用于指定后端设备类型，在 StratoVirt 虚拟化中，该值为 random 。</p></li></ul><h6 id="配置示例-6">配置示例</h6><p>配置周期为 1000ms 内最多产生 1234 字节，rng 设备在 host 中路径为 <code>/dev/random</code> ，并将其挂载在 bus 为 5、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb7"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>            /dev/random`</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>        ...</span></code></pre></div><h4 id="vsock-设备">vsock 设备</h4><h6 id="元素介绍-7">元素介绍</h6><ul><li><p>vsock：vsock 设备</p><p>属性 model：指定 vsock 设备类型，在 StratoVirt 虚拟化中，该值为 virtio 。</p></li><li><p>cid ：设置 vsock 设备的 cid</p><p>属性 address：用于设置 cid 的值</p></li></ul><h6 id="配置示例-7">配置示例</h6><p>配置 cid 为 8，并将其挂载在 bus 为 6、slot 为 0，function 为 0 的 PCI 总线上，示例为：</p><div class="sourceCode" id="cb8"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>        ...</span></code></pre></div><h3 id="体系架构相关配置">体系架构相关配置</h3><p>XML 中还有一些体系架构相关的配置，如 pflash、主板等。</p><h4 id="元素介绍-8">元素介绍</h4><ul><li><p>os：定义虚拟机启动参数</p><p>子元素 type ：指定虚拟机类型，属性 arch 表示架构，属性 machine 表示主板类型，在 StratoVirt 虚拟化中，AArch64 架构只支持 virt 主板，x86_64 架构只支持 Q35 主板。</p><p>子元素 kernel ：用于指定 kernel 路径。</p><p>子元素 cmdline ：指定命令行启动参数。</p><p>子元素 loader ：指定加载固件，属性 readonly 表示是否只读；属性 type 表示类型，在 StratoVirt 虚拟化中，该值为 pflash 。</p></li><li><p>features：hypervisor 支持的以下特性</p><p>子元素 acpi ：是否支持 ACPI，在 StratoVirt 虚拟化中使用了 ACPI 特性，所以该特性必须配置。</p><p>子元素 gic ：ARM 处理器指定中断处理器，属性 version 表示 GIC 的版本，在 StratoVirt 虚拟化中，该值为 3 。</p></li></ul><h6 id="配置示例-8">配置示例</h6><p>配置虚拟机 CPU 架构 ARM，主板为 virt ，启动命令行为：<code>console=ttyAMA0 root=/dev/vda reboot=k panic=1 rw</code> 。pflash 路径为：<code>/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw</code>，属性为只读。 kernel 路径为：<code>/home/std-vmlinuxz</code>。示例为：</p><div class="sourceCode" id="cb9"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a>        hvm</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>        /home/std-vmlinuxz</span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a>        console=ttyAMA0 root=/dev/vda reboot=k panic=1 rw</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>        `/usr/share/edk2/aarch64/QEMU_EFI-pflash.raw`</span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>    ...</span></code></pre></div><h3 id="内存大页">内存大页</h3><h6 id="元素介绍-9">元素介绍</h6><ul><li><p>memoryBacking：表示配置内存相关的信息</p></li><li><p>hugepages ：配置内存大页</p></li><li><p>page ：大页配置</p><p>属性 size ：内存大页的大小</p><p>属性 unit ：大页大小的单位</p></li></ul><h6 id="配置示例-9">配置示例</h6><p>配置 2MiB 大页示例如下：</p><div class="sourceCode" id="cb10"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>    ...</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a>    ...</span></code></pre></div><h3 id="配置示例-10">配置示例</h3><h4 id="x86-配置示例">x86 配置示例</h4><p>配置一台名为 StratoVirt ，内存 8GiB ，配置 1GiB 单位的内存大页，4 个虚拟 CPU，架构为 x86_64 ，主板类型为 Q35 ，对应 XML 文件的配置示例如下：</p><div class="sourceCode" id="cb11"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a>    StratoVirt</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a>    8</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a>    4</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>    1</span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>    hvm</span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>    /path/to/standard_vm_kernel</span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>    console=hvc0 root=/dev/vda reboot=k panic=1 rw</span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>    /path/to/pflash</span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>    /path/to/OVMF_VARS</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>        /path/to/StratoVirt_binary_file</span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>                1000</span>
+<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a>            /path/to/random_file</span></code></pre></div><h4 id="arm-配置示例">ARM 配置示例</h4><p>如果想要配置一台名为 StratoVirt ，内存 8GiB，配置 1GiB 单位大页，4 个虚拟 CPU，架构为 aarch64 ，主板类型为 virt ，对应 XML 文件的配置示例如下：</p><div class="sourceCode" id="cb12"><pre class="sourceCode xml"><code class="sourceCode xml"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a>    StratoVirt</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a>    8</span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a>    4</span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>    1</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>    hvm</span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>    /path/to/standard_vm_kernel</span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>    console=ttyAMA0 root=/dev/vda reboot=k panic=1 rw</span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a>    /path/to/pflash</span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a>        /path/to/StratoVirt_binary_file</span>
+<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-16"><a href="#cb12-16" aria-hidden="true" tabindex="-1"></a>                1000</span>
+<span id="cb12-17"><a href="#cb12-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-18"><a href="#cb12-18" aria-hidden="true" tabindex="-1"></a>            /path/to/random_file</span></code></pre></div><h2 id="管理虚拟机">管理虚拟机</h2><p>libvirt 使用 virsh 命令来管理虚拟机，当 StratoVirt 平台和 libvirt 对接时，仅支持以下与 StratoVirt 交互的命令：</p><ul><li><p>create：创建虚拟机</p></li><li><p>suspend：挂起虚拟机</p></li><li><p>resume：恢复虚拟机</p></li><li><p>destroy：销毁虚拟机</p></li><li><p>console：通过 console 登录虚拟机</p></li></ul><blockquote><p><strong>说明</strong></p><p>StratoVirt 暂不支持虚拟机重启、虚拟机关机等命令。</p></blockquote><h3 id="管理虚拟机生命周期">管理虚拟机生命周期</h3><p>假设用户已经按照需要完成一个名为 stratovirt 的虚拟机配置文件 st.xml ，则对应生命周期管理的命令如下：</p><ul><li><p>创建虚拟机</p><pre class="shell"><code>virsh create st.xml</code></pre><p>虚拟机创建完成后，可以通过 <strong>virsh list</strong> 命令查看，会存在一个名为 stratovirt 的虚拟机。</p></li><li><p>挂起虚拟机</p><pre class="shell"><code>virsh suspend stratovirt</code></pre><p>虚拟机挂起后，虚拟机暂停运行。可以通过 <strong>virsh list</strong> 命令查看，虚拟机 stratovirt 的状态为 paused 。</p></li><li><p>恢复虚拟机</p><pre><code>virsh resume stratovirt</code></pre><p>虚拟机恢复后，可以通过 <strong>virsh list</strong> 命令查看，虚拟机 stratovirt 的状态为 running 。</p></li><li><p>销毁虚拟机</p><pre><code>virsh destroy stratovirt</code></pre><p>虚拟机销毁后，使用 <strong>virsh list</strong> 查看虚拟机，发现虚拟机 stratovirt 不存在。</p></li></ul><h3 id="登录虚拟机">登录虚拟机</h3><p>虚拟机创建完成后，可以通过 <strong>virsh console</strong> 登录虚拟机内部操作虚拟机。假设虚拟机名称为 stratovirt，参考命令如下：</p><pre><code>virsh console stratovirt</code></pre><blockquote><p><strong>说明</strong></p><p>为了可以正常使用 virsh console 命令，需要在 XML 中配置 console 设备的重定向类型为 pty 。</p></blockquote>
+</body>
+</html>

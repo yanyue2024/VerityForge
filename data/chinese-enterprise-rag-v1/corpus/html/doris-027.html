@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>join</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">join</h1>
+</header>
+<h1 id="join">join</h1><p>在数据分析场景中，业务数据往往被拆分到多张表中（例如订单表、用户表、商品表）。当需要将这些表关联起来生成完整的分析结果时，就需要使用 JOIN。本文介绍 Apache Doris 支持的 JOIN 类型，以及在 MPP 架构下 JOIN 的物理实现与 Shuffle 策略，帮助你根据业务场景选择合适的 JOIN 方式。</p><h2 id="什么是-join">什么是 JOIN</h2><p>在关系型数据库中，数据被分布在多个表中，这些表之间通过特定关系相互关联。SQL JOIN 操作允许我们根据这些关联条件将不同的表合并成一个更完整的结果集。</p><h2 id="doris-支持的-join-类型">Doris 支持的 JOIN 类型</h2><p>Doris 支持以下 JOIN 类型，可满足从常规关联到反连接、半连接等多种业务场景：</p><table><thead><tr class="header"><th>JOIN 类型</th><th>中文名称</th><th>行为说明</th></tr></thead><tbody><tr class="odd"><td>INNER JOIN</td><td>内连接</td><td>对左表每一行和右表所有行进行 JOIN 条件比较，返回两个表中满足 JOIN 条件的匹配行</td></tr><tr class="even"><td>LEFT JOIN</td><td>左连接</td><td>在 INNER JOIN 的结果集基础上，如果左表的行在右表中没有匹配，则返回左表的所有行，同时右表对应的列显示为 NULL</td></tr><tr class="odd"><td>RIGHT JOIN</td><td>右连接</td><td>与 LEFT JOIN 相反，如果右表的行在左表中没有匹配，则返回右表的所有行，同时左表对应的列显示为 NULL</td></tr><tr class="even"><td>FULL JOIN</td><td>全连接</td><td>在 INNER JOIN 的结果集基础上，返回两个表中所有的行，如果某行在另一侧表中没有匹配，则另一侧表的相应列显示为 NULL</td></tr><tr class="odd"><td>CROSS JOIN</td><td>交叉连接</td><td>没有 JOIN 条件，返回两个表的笛卡尔积，即左表的每一行与右表的每一行都进行组合</td></tr><tr class="even"><td>LEFT SEMI JOIN</td><td>左半连接</td><td>对左表每一行和右表所有行进行 JOIN 条件比较，如果存在匹配，就返回左表的对应行</td></tr><tr class="odd"><td>RIGHT SEMI JOIN</td><td>右半连接</td><td>与 LEFT SEMI JOIN 相反，对右表每一行和左表所有行进行 JOIN 条件比较，如果存在匹配，就返回右表的对应行</td></tr><tr class="even"><td>LEFT ANTI JOIN</td><td>左反半连接</td><td>对左表每一行和右表所有行进行 JOIN 条件比较，如果没有匹配，则返回左表的对应行</td></tr><tr class="odd"><td>RIGHT ANTI JOIN</td><td>右反半连接</td><td>与 LEFT ANTI JOIN 相反，对右表每一行和左表所有行进行 JOIN 条件比较，如果没有匹配，则返回这些行</td></tr><tr class="even"><td>NULL AWARE LEFT ANTI JOIN</td><td>对 NULL 值特殊处理的左反半连接</td><td>与 LEFT ANTI JOIN 类似，但忽略左表中匹配列为 NULL 的行</td></tr></tbody></table><p>JOIN 的完整 SQL 语法定义请参考 SELECT。</p><h2 id="join-的物理实现">JOIN 的物理实现</h2><p>Doris 支持两种 JOIN 的物理实现方式：<strong>Hash Join</strong> 和 <strong>Nest Loop Join</strong>。两者的适用场景如下：</p><ul><li><p><strong>Hash Join</strong>：在右表上根据等值 JOIN 列构建一个哈希表，左表的数据以流式方式通过该哈希表进行 JOIN 计算。这种方法的局限性在于它仅适用于等值 JOIN 条件的情况。</p></li><li><p><strong>Nest Loop Join</strong>：通过两层循环，以左表驱动，对左表的每一行逐一遍历右表的每一行，进行 JOIN 条件判断。适用于所有 JOIN 场景，包括处理 Hash Join 无法胜任的情况，比如涉及大于或小于比较条件的查询，或是需要执行笛卡尔积运算的场景。但相比 Hash Join，Nest Loop Join 在性能上可能会有所不及。</p></li></ul><h2 id="hash-join-的-shuffle-策略">Hash Join 的 Shuffle 策略</h2><p>作为分布式 MPP 数据库，Apache Doris 在 Hash Join 过程中需要进行数据的 Shuffle，进行拆分调度，以确保 JOIN 结果的正确性。Doris 提供了四种 Shuffle 策略，按数据分布要求由低到高、性能潜力由低到高排列：Broadcast Join、Partition Shuffle Join、Bucket Shuffle Join、Colocate Join。</p><h3 id="broadcast-join">Broadcast Join</h3><p>如图所示，Broadcast Join 的过程涉及将右表的所有数据发送到所有参与 JOIN 计算的节点，包括左表数据的扫描节点，而左表数据则保持不动。这一过程中，每个节点都会接收到右表的完整数据副本（总量为 T(R) 的数据），以确保所有节点都具备执行 JOIN 操作所需的数据。</p><p>该方法适用于多种通用场景，但不适用于 RIGHT OUTER、RIGHT ANTI 和 RIGHT SEMI 类型的 Hash Join。其网络开销为 JOIN 的节点数 N 乘以右表数据量 T(R)。</p><p>图片说明：Implementation of Hash Join in Doris</p><h3 id="partition-shuffle-join">Partition Shuffle Join</h3><p>此方式通过 JOIN 条件计算 Hash 值并进行分桶。具体来说，左右表的数据会根据 JOIN 条件计算得到的 Hash 值进行分区，然后这些分区数据被发送到相应的分区节点上（如图所示）。</p><p>该方法的网络开销主要包括两个部分：传输左表数据 T(S) 所需的开销和传输右表数据 T(R) 所需的开销。该方法仅支持 Hash Join 操作，因为它依赖于 JOIN 条件来执行数据的分桶操作。</p><p>图片说明：Partition Shuffle Join</p><h3 id="bucket-shuffle-join">Bucket Shuffle Join</h3><p>当 JOIN 条件包含左表的分桶列时，保持左表数据不动，将右表数据分发到左表节点进行 JOIN，减少网络开销。</p><p>当参与 JOIN 操作的某一侧表的数据已经按照 JOIN 条件列进行了 Hash 分布时，我们可以选择保持这一侧的数据位置不变，而将另一侧的数据依据相同的 JOIN 条件列、相同的 Hash 分布计算进行数据分发。（这里提到的"表"不仅限于物理存储的表，还可以是 SQL 查询中任意算子的输出结果，并且可以灵活选择保持左表或右表的数据位置不变，而只移动并分发另一侧的表。）</p><p>以 Doris 的物理表为例，由于其表数据本身就是通过 Hash 计算进行分桶存储，因此可以直接利用这一特性来优化 JOIN 操作的数据 Shuffle 过程。假设我们有两张表需要进行 JOIN，且 JOIN 列是左表的分桶列，那么在这种情况下，我们无需移动左表的数据，只需根据左表的分桶信息将右表的数据分发到相应的位置，即可完成 JOIN 计算（如图所示）。</p><p>此过程的网络开销主要来自于右表数据的移动，即 T(R)。</p><p>图片说明：Bucket Shuffle Join</p><h3 id="colocate-join">Colocate Join</h3><p>与 Bucket Shuffle Join 相似，如果参与 JOIN 的两侧的表，刚好是按照 JOIN 条件列进行计算的 Hash 分布，那么可以跳过 Shuffle 过程，直接在本地进行 JOIN 计算。以下通过物理表进行简单说明：</p><p>当 Doris 在建表时指定为 DISTRIBUTED BY HASH，那么在数据导入时，系统会根据 Hash 分布键进行数据分发。如果两张表的 Hash 分布键恰好与 JOIN 条件列一致，那么可以认为这两张表的数据已经按照 JOIN 的需求进行了预分布，即无需额外的 Shuffle 操作。因此，在实际查询时，可以直接在这两张表上执行 JOIN 计算。</p><p>:::caution 注意 对于直接 Scan 数据后执行 JOIN 的场景，建表时需要满足一定的条件，具体请参考后续关于两张物理表进行 Colocate Join 的限制说明。 :::</p><p>图片说明：Colocate Join</p><h2 id="四种-shuffle-方式对比">四种 Shuffle 方式对比</h2><p>下表汇总了四种 Shuffle 方式的网络开销、支持的物理算子和适用场景：</p><table><thead><tr class="header"><th>Shuffle 方式</th><th>网络开销</th><th>物理算子</th><th>适用场景</th></tr></thead><tbody><tr class="odd"><td>Broadcast</td><td>N * T(R)</td><td>Hash Join / Nest Loop Join</td><td>通用</td></tr><tr class="even"><td>Shuffle</td><td>T(S) + T(R)</td><td>Hash Join</td><td>通用</td></tr><tr class="odd"><td>Bucket Shuffle</td><td>T(R)</td><td>Hash Join</td><td>JOIN 条件含左表分桶列，左表单分区</td></tr><tr class="even"><td>Colocate</td><td>0</td><td>Hash Join</td><td>JOIN 条件含左表分桶列，且两表属同一 Colocate Group</td></tr></tbody></table><p>:::info 备注</p><ul><li>N：参与 JOIN 计算的 Instance 个数</li><li>T(关系)：关系的 Tuple 数目</li></ul><p>:::</p><p>上述四种 Shuffle 方式的灵活性依次递减，它们对数据分布的要求也愈发严格。在多数场景下，随着对数据分布要求的提高，JOIN 计算的性能往往也会逐步提升。值得注意的是，如果表的 Bucket 数量较少，Bucket Shuffle 或 Colocate Join 可能会因为并行度较低而导致性能下降，甚至可能慢于 Shuffle Join。这是因为 Shuffle 操作能更有效地均衡数据的分布，从而在后续处理中提供更高的并行度。</p><h2 id="bucket-shuffle-join-与-colocate-join-实战示例">Bucket Shuffle Join 与 Colocate Join 实战示例</h2><p>上文我们提到过，对于 Bucket Shuffle Join 和 Colocate Join，只要参与 JOIN 操作的两侧的表分布满足特定条件，就可以执行相应的 JOIN 操作（这里的表指的是更广义的表，即 SQL 查询中任意算子的输出都可以视为一张"表"）。</p><p>接下来，我们将分别通过 t1 和 t2 两张表以及相关的 SQL 示例，来更详细地介绍广义上的 Bucket Shuffle Join 和 Colocate Join。首先，给出这两张表的建表语句如下：</p><div class="sourceCode" id="cb1"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="kw">create</span> <span class="kw">table</span> t1</span>
+<span id="cb1-2"><a href="#cb1-2" aria-hidden="true" tabindex="-1"></a>(</span>
+<span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a>    c1 bigint,</span>
+<span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a>    c2 bigint</span>
+<span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="kw">DISTRIBUTED</span> <span class="kw">BY</span> <span class="kw">HASH</span>(c1) BUCKETS <span class="dv">3</span></span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a>PROPERTIES (<span class="ot">&quot;replication_num&quot;</span> <span class="op">=</span> <span class="ot">&quot;1&quot;</span>);</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="kw">create</span> <span class="kw">table</span> t2</span>
+<span id="cb1-10"><a href="#cb1-10" aria-hidden="true" tabindex="-1"></a>(</span>
+<span id="cb1-11"><a href="#cb1-11" aria-hidden="true" tabindex="-1"></a>    c1 bigint,</span>
+<span id="cb1-12"><a href="#cb1-12" aria-hidden="true" tabindex="-1"></a>    c2 bigint</span>
+<span id="cb1-13"><a href="#cb1-13" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb1-14"><a href="#cb1-14" aria-hidden="true" tabindex="-1"></a><span class="kw">DISTRIBUTED</span> <span class="kw">BY</span> <span class="kw">HASH</span>(c1) BUCKETS <span class="dv">3</span></span>
+<span id="cb1-15"><a href="#cb1-15" aria-hidden="true" tabindex="-1"></a>PROPERTIES (<span class="ot">&quot;replication_num&quot;</span> <span class="op">=</span> <span class="ot">&quot;1&quot;</span>);</span></code></pre></div><h3 id="bucket-shuffle-join-示例">Bucket Shuffle Join 示例</h3><p>在下面的例子中，t1 和 t2 表都经过了 GROUP BY 算子处理，并输出了新的表（此时 tx 表按照 c1 进行 Hash 分布，而 ty 表则按照 c2 进行 Hash 分布）。随后的 JOIN 条件是 <code>tx.c1 = ty.c2</code>，这恰好满足了 Bucket Shuffle Join 的条件。</p><div class="sourceCode" id="cb2"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="kw">explain</span> <span class="kw">select</span> <span class="op">*</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="kw">from</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a>    (</span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- t1 表按照 c1 做了 hash 分布，经过 group by 算子后，仍然保持按照 c1 做的 hash 分布</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">select</span> c1 <span class="kw">as</span> c1, <span class="fu">sum</span>(c2) <span class="kw">as</span> c2</span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">from</span> t1</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">group</span> <span class="kw">by</span> c1</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a>    ) tx</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="kw">join</span></span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a>    (</span>
+<span id="cb2-11"><a href="#cb2-11" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- t2 表按照 c1 做了 hash 分布，经过 group by 算子后，数据分布变成按照 c2 进行的 hash 分布</span></span>
+<span id="cb2-12"><a href="#cb2-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">select</span> c2 <span class="kw">as</span> c2, <span class="fu">sum</span>(c1) <span class="kw">as</span> c1</span>
+<span id="cb2-13"><a href="#cb2-13" aria-hidden="true" tabindex="-1"></a>        <span class="kw">from</span> t2</span>
+<span id="cb2-14"><a href="#cb2-14" aria-hidden="true" tabindex="-1"></a>        <span class="kw">group</span> <span class="kw">by</span> c2</span>
+<span id="cb2-15"><a href="#cb2-15" aria-hidden="true" tabindex="-1"></a>    ) ty</span>
+<span id="cb2-16"><a href="#cb2-16" aria-hidden="true" tabindex="-1"></a><span class="kw">on</span> tx.c1 <span class="op">=</span> ty.c2;</span></code></pre></div><p>从下面的 Explain 执行计划中，我们可以观察到，7 号 Hash Join 节点的左侧子节点是 6 号聚合节点，而右侧子节点是 4 号 Exchange 节点。这表示左侧子节点聚合后的数据位置保持不变，而右侧子节点的数据则会根据 Bucket Shuffle 的方式被分发到左侧子节点所在的节点上，以便进行后续的 Hash Join 操作。</p><div class="sourceCode" id="cb3"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a>| <span class="kw">Explain</span> String(Nereids Planner)                            |</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">0</span>                                            |</span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>|   OUTPUT EXPRS:                                            |</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a>|     c1[#<span class="dv">18</span>]                                                |</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a>|     c2[#<span class="dv">19</span>]                                                |</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a>|     c2[#<span class="dv">20</span>]                                                |</span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>|     c1[#<span class="dv">21</span>]                                                |</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c1[#<span class="dv">8</span>]                      |</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">true</span>                                 |</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a>|   VRESULT SINK                                             |</span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>|      MYSQL_PROTOCAL                                        |</span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-17"><a href="#cb3-17" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">7</span><span class="ch">:VHASH</span> <span class="kw">JOIN</span>(<span class="dv">364</span>)                                        |</span>
+<span id="cb3-18"><a href="#cb3-18" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">join</span> op: <span class="kw">INNER</span> <span class="kw">JOIN</span>(BUCKET_SHUFFLE)[]                 |</span>
+<span id="cb3-19"><a href="#cb3-19" aria-hidden="true" tabindex="-1"></a>|   |  equal <span class="kw">join</span> conjunct: (c1[#<span class="dv">12</span>] <span class="op">=</span> c2[#<span class="dv">6</span>])               |</span>
+<span id="cb3-20"><a href="#cb3-20" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>                                        |</span>
+<span id="cb3-21"><a href="#cb3-21" aria-hidden="true" tabindex="-1"></a>|   |  vec output tuple <span class="kw">id</span>: <span class="dv">8</span>                                |</span>
+<span id="cb3-22"><a href="#cb3-22" aria-hidden="true" tabindex="-1"></a>|   |  output tuple <span class="kw">id</span>: <span class="dv">8</span>                                    |</span>
+<span id="cb3-23"><a href="#cb3-23" aria-hidden="true" tabindex="-1"></a>|   |  vIntermediate tuple ids: <span class="dv">7</span>                            |</span>
+<span id="cb3-24"><a href="#cb3-24" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">hash</span> output slot ids: <span class="dv">6</span> <span class="dv">7</span> <span class="dv">12</span> <span class="dv">13</span>                       |</span>
+<span id="cb3-25"><a href="#cb3-25" aria-hidden="true" tabindex="-1"></a>|   |  final projections: c1[#<span class="dv">14</span>], c2[#<span class="dv">15</span>], c2[#<span class="dv">16</span>], c1[#<span class="dv">17</span>] |</span>
+<span id="cb3-26"><a href="#cb3-26" aria-hidden="true" tabindex="-1"></a>|   |  final project output tuple <span class="kw">id</span>: <span class="dv">8</span>                      |</span>
+<span id="cb3-27"><a href="#cb3-27" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c1[#<span class="dv">12</span>]                        |</span>
+<span id="cb3-28"><a href="#cb3-28" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c2[#<span class="dv">6</span>]                         |</span>
+<span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>|   |<span class="co">----4:VEXCHANGE                                         |</span></span>
+<span id="cb3-31"><a href="#cb3-31" aria-hidden="true" tabindex="-1"></a>|   |       offset: <span class="dv">0</span>                                        |</span>
+<span id="cb3-32"><a href="#cb3-32" aria-hidden="true" tabindex="-1"></a>|   |       distribute expr lists: c2[#<span class="dv">6</span>]                    |</span>
+<span id="cb3-33"><a href="#cb3-33" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb3-34"><a href="#cb3-34" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">6</span><span class="ch">:VAGGREGATE</span> (<span class="kw">update</span> finalize)(<span class="dv">342</span>)                      |</span>
+<span id="cb3-35"><a href="#cb3-35" aria-hidden="true" tabindex="-1"></a>|   |  output: <span class="fu">sum</span>(c2[#<span class="dv">9</span>])[#<span class="dv">11</span>]                              |</span>
+<span id="cb3-36"><a href="#cb3-36" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c1[#<span class="dv">8</span>]                                      |</span>
+<span id="cb3-37"><a href="#cb3-37" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb3-38"><a href="#cb3-38" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>                                        |</span>
+<span id="cb3-39"><a href="#cb3-39" aria-hidden="true" tabindex="-1"></a>|   |  final projections: c1[#<span class="dv">10</span>], c2[#<span class="dv">11</span>]                   |</span>
+<span id="cb3-40"><a href="#cb3-40" aria-hidden="true" tabindex="-1"></a>|   |  final project output tuple <span class="kw">id</span>: <span class="dv">6</span>                      |</span>
+<span id="cb3-41"><a href="#cb3-41" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c1[#<span class="dv">8</span>]                         |</span>
+<span id="cb3-42"><a href="#cb3-42" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb3-43"><a href="#cb3-43" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">5</span><span class="ch">:VOlapScanNode</span>(<span class="dv">339</span>)                                     |</span>
+<span id="cb3-44"><a href="#cb3-44" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">TABLE</span>: tt.t1(t1), PREAGGREGATION: <span class="kw">ON</span>                  |</span>
+<span id="cb3-45"><a href="#cb3-45" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">partitions</span><span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span> (t1)                                   |</span>
+<span id="cb3-46"><a href="#cb3-46" aria-hidden="true" tabindex="-1"></a>|      tablets<span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span>, tabletList<span class="op">=</span><span class="dv">491188</span>                        |</span>
+<span id="cb3-47"><a href="#cb3-47" aria-hidden="true" tabindex="-1"></a>|      <span class="fu">cardinality</span><span class="op">=</span><span class="dv">21</span>, avgRowSize<span class="op">=</span><span class="fl">0.0</span>, numNodes<span class="op">=</span><span class="dv">1</span>            |</span>
+<span id="cb3-48"><a href="#cb3-48" aria-hidden="true" tabindex="-1"></a>|      pushAggOp<span class="op">=</span><span class="kw">NONE</span>                                        |</span>
+<span id="cb3-49"><a href="#cb3-49" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-50"><a href="#cb3-50" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">1</span>                                            |</span>
+<span id="cb3-51"><a href="#cb3-51" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-52"><a href="#cb3-52" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c2[#<span class="dv">2</span>]                      |</span>
+<span id="cb3-53"><a href="#cb3-53" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-54"><a href="#cb3-54" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">true</span>                                 |</span>
+<span id="cb3-55"><a href="#cb3-55" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-56"><a href="#cb3-56" aria-hidden="true" tabindex="-1"></a>|   STREAM <span class="kw">DATA</span> SINK                                         |</span>
+<span id="cb3-57"><a href="#cb3-57" aria-hidden="true" tabindex="-1"></a>|     <span class="kw">EXCHANGE</span> <span class="kw">ID</span>: <span class="dv">04</span>                                        |</span>
+<span id="cb3-58"><a href="#cb3-58" aria-hidden="true" tabindex="-1"></a>|     BUCKET_SHFFULE_HASH_PARTITIONED: c2[#<span class="dv">6</span>]                |</span>
+<span id="cb3-59"><a href="#cb3-59" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-60"><a href="#cb3-60" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">3</span><span class="ch">:VAGGREGATE</span> (<span class="kw">merge</span> finalize)(<span class="dv">355</span>)                       |</span>
+<span id="cb3-61"><a href="#cb3-61" aria-hidden="true" tabindex="-1"></a>|   |  output: <span class="fu">sum</span>(partial_sum(c1)[#<span class="dv">3</span>])[#<span class="dv">5</span>]                  |</span>
+<span id="cb3-62"><a href="#cb3-62" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">2</span>]                                      |</span>
+<span id="cb3-63"><a href="#cb3-63" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb3-64"><a href="#cb3-64" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">5</span>                                         |</span>
+<span id="cb3-65"><a href="#cb3-65" aria-hidden="true" tabindex="-1"></a>|   |  final projections: c2[#<span class="dv">4</span>], c1[#<span class="dv">5</span>]                     |</span>
+<span id="cb3-66"><a href="#cb3-66" aria-hidden="true" tabindex="-1"></a>|   |  final project output tuple <span class="kw">id</span>: <span class="dv">3</span>                      |</span>
+<span id="cb3-67"><a href="#cb3-67" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c2[#<span class="dv">2</span>]                         |</span>
+<span id="cb3-68"><a href="#cb3-68" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb3-69"><a href="#cb3-69" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">2</span><span class="ch">:VEXCHANGE</span>                                              |</span>
+<span id="cb3-70"><a href="#cb3-70" aria-hidden="true" tabindex="-1"></a>|      offset: <span class="dv">0</span>                                             |</span>
+<span id="cb3-71"><a href="#cb3-71" aria-hidden="true" tabindex="-1"></a>|      distribute expr lists:                                |</span>
+<span id="cb3-72"><a href="#cb3-72" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-73"><a href="#cb3-73" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">2</span>                                            |</span>
+<span id="cb3-74"><a href="#cb3-74" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-75"><a href="#cb3-75" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c1[#<span class="dv">0</span>]                      |</span>
+<span id="cb3-76"><a href="#cb3-76" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-77"><a href="#cb3-77" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">false</span>                                |</span>
+<span id="cb3-78"><a href="#cb3-78" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-79"><a href="#cb3-79" aria-hidden="true" tabindex="-1"></a>|   STREAM <span class="kw">DATA</span> SINK                                         |</span>
+<span id="cb3-80"><a href="#cb3-80" aria-hidden="true" tabindex="-1"></a>|     <span class="kw">EXCHANGE</span> <span class="kw">ID</span>: <span class="dv">02</span>                                        |</span>
+<span id="cb3-81"><a href="#cb3-81" aria-hidden="true" tabindex="-1"></a>|     HASH_PARTITIONED: c2[#<span class="dv">2</span>]                               |</span>
+<span id="cb3-82"><a href="#cb3-82" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-83"><a href="#cb3-83" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">1</span><span class="ch">:VAGGREGATE</span> (<span class="kw">update</span> serialize)(<span class="dv">349</span>)                     |</span>
+<span id="cb3-84"><a href="#cb3-84" aria-hidden="true" tabindex="-1"></a>|   |  STREAMING                                             |</span>
+<span id="cb3-85"><a href="#cb3-85" aria-hidden="true" tabindex="-1"></a>|   |  output: partial_sum(c1[#<span class="dv">0</span>])[#<span class="dv">3</span>]                       |</span>
+<span id="cb3-86"><a href="#cb3-86" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">1</span>]                                      |</span>
+<span id="cb3-87"><a href="#cb3-87" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb3-88"><a href="#cb3-88" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">5</span>                                         |</span>
+<span id="cb3-89"><a href="#cb3-89" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c1[#<span class="dv">0</span>]                         |</span>
+<span id="cb3-90"><a href="#cb3-90" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb3-91"><a href="#cb3-91" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">0</span><span class="ch">:VOlapScanNode</span>(<span class="dv">346</span>)                                     |</span>
+<span id="cb3-92"><a href="#cb3-92" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">TABLE</span>: tt.t2(t2), PREAGGREGATION: <span class="kw">ON</span>                  |</span>
+<span id="cb3-93"><a href="#cb3-93" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">partitions</span><span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span> (t2)                                   |</span>
+<span id="cb3-94"><a href="#cb3-94" aria-hidden="true" tabindex="-1"></a>|      tablets<span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span>, tabletList<span class="op">=</span><span class="dv">491198</span>                        |</span>
+<span id="cb3-95"><a href="#cb3-95" aria-hidden="true" tabindex="-1"></a>|      <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>, avgRowSize<span class="op">=</span><span class="fl">0.0</span>, numNodes<span class="op">=</span><span class="dv">1</span>            |</span>
+<span id="cb3-96"><a href="#cb3-96" aria-hidden="true" tabindex="-1"></a>|      pushAggOp<span class="op">=</span><span class="kw">NONE</span>                                        |</span>
+<span id="cb3-97"><a href="#cb3-97" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-98"><a href="#cb3-98" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb3-99"><a href="#cb3-99" aria-hidden="true" tabindex="-1"></a>| <span class="kw">Statistics</span>                                                 |</span>
+<span id="cb3-100"><a href="#cb3-100" aria-hidden="true" tabindex="-1"></a>|  planed <span class="kw">with</span> unknown <span class="kw">column</span> <span class="kw">statistics</span>                     |</span>
+<span id="cb3-101"><a href="#cb3-101" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb3-102"><a href="#cb3-102" aria-hidden="true" tabindex="-1"></a><span class="dv">97</span> <span class="kw">rows</span> <span class="kw">in</span> <span class="kw">set</span> (<span class="fl">0.01</span> sec)</span></code></pre></div><h3 id="colocate-join-示例">Colocate Join 示例</h3><p>在下面的例子中，t1 和 t2 表都通过 GROUP BY 算子进行了处理，并输出了新的表（此时 tx 和 ty 均按照 c2 进行了 Hash 分布）。随后的 JOIN 条件是 <code>tx.c2 = ty.c2</code>，这恰好满足了 Colocate Join 的条件。</p><div class="sourceCode" id="cb4"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="kw">explain</span> <span class="kw">select</span> <span class="op">*</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="kw">from</span></span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>    (</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- t1 表按照 c1 做了 hash 分布，经过 group by 算子后，数据分布变成按照 c2 进行的 hash 分布</span></span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>        <span class="kw">select</span> c2 <span class="kw">as</span> c2, <span class="fu">sum</span>(c1) <span class="kw">as</span> c1</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>        <span class="kw">from</span> t1</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a>        <span class="kw">group</span> <span class="kw">by</span> c2</span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    ) tx</span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a><span class="kw">join</span></span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    (</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>        <span class="co">-- t2 表按照 c1 做了 hash 分布，经过 group by 算子后，数据分布变成按照 c2 进行的 hash 分布</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a>        <span class="kw">select</span> c2 <span class="kw">as</span> c2, <span class="fu">sum</span>(c1) <span class="kw">as</span> c1</span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>        <span class="kw">from</span> t2</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>        <span class="kw">group</span> <span class="kw">by</span> c2</span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a>    ) ty</span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a><span class="kw">on</span> tx.c2 <span class="op">=</span> ty.c2;</span></code></pre></div><p>从下面的 Explain 执行计划结果中可以看出，8 号 Hash Join 节点的左侧子节点是 7 号聚合节点，右侧子节点是 3 号聚合节点，并且没有出现 Exchange 节点。这表明左侧和右侧子节点聚合后的数据都保持在其原始位置不动，无需进行数据移动，可以直接在本地进行后续的 Hash Join 操作。</p><div class="sourceCode" id="cb5"><pre class="sourceCode sql"><code class="sourceCode sql"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>| <span class="kw">Explain</span> String(Nereids Planner)                            |</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">0</span>                                            |</span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>|   OUTPUT EXPRS:                                            |</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>|     c2[#<span class="dv">20</span>]                                                |</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>|     c1[#<span class="dv">21</span>]                                                |</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>|     c2[#<span class="dv">22</span>]                                                |</span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>|     c1[#<span class="dv">23</span>]                                                |</span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c2[#<span class="dv">10</span>]                     |</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">true</span>                                 |</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>|   VRESULT SINK                                             |</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>|      MYSQL_PROTOCAL                                        |</span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">8</span><span class="ch">:VHASH</span> <span class="kw">JOIN</span>(<span class="dv">373</span>)                                        |</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">join</span> op: <span class="kw">INNER</span> <span class="kw">JOIN</span>(PARTITIONED)[]                    |</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>|   |  equal <span class="kw">join</span> conjunct: (c2[#<span class="dv">14</span>] <span class="op">=</span> c2[#<span class="dv">6</span>])               |</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>                                        |</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>|   |  vec output tuple <span class="kw">id</span>: <span class="dv">9</span>                                |</span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>|   |  output tuple <span class="kw">id</span>: <span class="dv">9</span>                                    |</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>|   |  vIntermediate tuple ids: <span class="dv">8</span>                            |</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">hash</span> output slot ids: <span class="dv">6</span> <span class="dv">7</span> <span class="dv">14</span> <span class="dv">15</span>                       |</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>|   |  final projections: c2[#<span class="dv">16</span>], c1[#<span class="dv">17</span>], c2[#<span class="dv">18</span>], c1[#<span class="dv">19</span>] |</span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>|   |  final project output tuple <span class="kw">id</span>: <span class="dv">9</span>                      |</span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c2[#<span class="dv">14</span>]                        |</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c2[#<span class="dv">6</span>]                         |</span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>|   |<span class="co">----3:VAGGREGATE (merge finalize)(367)                  |</span></span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>|   |    |  output: <span class="fu">sum</span>(partial_sum(c1)[#<span class="dv">3</span>])[#<span class="dv">5</span>]             |</span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a>|   |    |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">2</span>]                                 |</span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>|   |    |  sortByGroupKey<span class="ch">:false</span>                             |</span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a>|   |    |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">5</span>                                    |</span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>|   |    |  final projections: c2[#<span class="dv">4</span>], c1[#<span class="dv">5</span>]                |</span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>|   |    |  final project output tuple <span class="kw">id</span>: <span class="dv">3</span>                 |</span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>|   |    |  distribute expr lists: c2[#<span class="dv">2</span>]                    |</span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>|   |    |                                                   |</span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>|   |    <span class="dv">2</span><span class="ch">:VEXCHANGE</span>                                         |</span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a>|   |       offset: <span class="dv">0</span>                                        |</span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a>|   |       distribute expr lists:                           |</span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">7</span><span class="ch">:VAGGREGATE</span> (<span class="kw">merge</span> finalize)(<span class="dv">354</span>)                       |</span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a>|   |  output: <span class="fu">sum</span>(partial_sum(c1)[#<span class="dv">11</span>])[#<span class="dv">13</span>]                |</span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">10</span>]                                     |</span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>                                        |</span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a>|   |  final projections: c2[#<span class="dv">12</span>], c1[#<span class="dv">13</span>]                   |</span>
+<span id="cb5-49"><a href="#cb5-49" aria-hidden="true" tabindex="-1"></a>|   |  final project output tuple <span class="kw">id</span>: <span class="dv">7</span>                      |</span>
+<span id="cb5-50"><a href="#cb5-50" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c2[#<span class="dv">10</span>]                        |</span>
+<span id="cb5-51"><a href="#cb5-51" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb5-52"><a href="#cb5-52" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">6</span><span class="ch">:VEXCHANGE</span>                                              |</span>
+<span id="cb5-53"><a href="#cb5-53" aria-hidden="true" tabindex="-1"></a>|      offset: <span class="dv">0</span>                                             |</span>
+<span id="cb5-54"><a href="#cb5-54" aria-hidden="true" tabindex="-1"></a>|      distribute expr lists:                                |</span>
+<span id="cb5-55"><a href="#cb5-55" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-56"><a href="#cb5-56" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">1</span>                                            |</span>
+<span id="cb5-57"><a href="#cb5-57" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-58"><a href="#cb5-58" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c1[#<span class="dv">8</span>]                      |</span>
+<span id="cb5-59"><a href="#cb5-59" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-60"><a href="#cb5-60" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">false</span>                                |</span>
+<span id="cb5-61"><a href="#cb5-61" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-62"><a href="#cb5-62" aria-hidden="true" tabindex="-1"></a>|   STREAM <span class="kw">DATA</span> SINK                                         |</span>
+<span id="cb5-63"><a href="#cb5-63" aria-hidden="true" tabindex="-1"></a>|     <span class="kw">EXCHANGE</span> <span class="kw">ID</span>: <span class="dv">06</span>                                        |</span>
+<span id="cb5-64"><a href="#cb5-64" aria-hidden="true" tabindex="-1"></a>|     HASH_PARTITIONED: c2[#<span class="dv">10</span>]                              |</span>
+<span id="cb5-65"><a href="#cb5-65" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-66"><a href="#cb5-66" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">5</span><span class="ch">:VAGGREGATE</span> (<span class="kw">update</span> serialize)(<span class="dv">348</span>)                     |</span>
+<span id="cb5-67"><a href="#cb5-67" aria-hidden="true" tabindex="-1"></a>|   |  STREAMING                                             |</span>
+<span id="cb5-68"><a href="#cb5-68" aria-hidden="true" tabindex="-1"></a>|   |  output: partial_sum(c1[#<span class="dv">8</span>])[#<span class="dv">11</span>]                      |</span>
+<span id="cb5-69"><a href="#cb5-69" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">9</span>]                                      |</span>
+<span id="cb5-70"><a href="#cb5-70" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb5-71"><a href="#cb5-71" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>                                        |</span>
+<span id="cb5-72"><a href="#cb5-72" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c1[#<span class="dv">8</span>]                         |</span>
+<span id="cb5-73"><a href="#cb5-73" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb5-74"><a href="#cb5-74" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">4</span><span class="ch">:VOlapScanNode</span>(<span class="dv">345</span>)                                     |</span>
+<span id="cb5-75"><a href="#cb5-75" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">TABLE</span>: tt.t1(t1), PREAGGREGATION: <span class="kw">ON</span>                  |</span>
+<span id="cb5-76"><a href="#cb5-76" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">partitions</span><span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span> (t1)                                   |</span>
+<span id="cb5-77"><a href="#cb5-77" aria-hidden="true" tabindex="-1"></a>|      tablets<span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span>, tabletList<span class="op">=</span><span class="dv">491188</span>                        |</span>
+<span id="cb5-78"><a href="#cb5-78" aria-hidden="true" tabindex="-1"></a>|      <span class="fu">cardinality</span><span class="op">=</span><span class="dv">21</span>, avgRowSize<span class="op">=</span><span class="fl">0.0</span>, numNodes<span class="op">=</span><span class="dv">1</span>            |</span>
+<span id="cb5-79"><a href="#cb5-79" aria-hidden="true" tabindex="-1"></a>|      pushAggOp<span class="op">=</span><span class="kw">NONE</span>                                        |</span>
+<span id="cb5-80"><a href="#cb5-80" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-81"><a href="#cb5-81" aria-hidden="true" tabindex="-1"></a>| <span class="kw">PLAN</span> FRAGMENT <span class="dv">2</span>                                            |</span>
+<span id="cb5-82"><a href="#cb5-82" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-83"><a href="#cb5-83" aria-hidden="true" tabindex="-1"></a>|   <span class="kw">PARTITION</span>: HASH_PARTITIONED: c1[#<span class="dv">0</span>]                      |</span>
+<span id="cb5-84"><a href="#cb5-84" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-85"><a href="#cb5-85" aria-hidden="true" tabindex="-1"></a>|   HAS_COLO_PLAN_NODE: <span class="kw">false</span>                                |</span>
+<span id="cb5-86"><a href="#cb5-86" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-87"><a href="#cb5-87" aria-hidden="true" tabindex="-1"></a>|   STREAM <span class="kw">DATA</span> SINK                                         |</span>
+<span id="cb5-88"><a href="#cb5-88" aria-hidden="true" tabindex="-1"></a>|     <span class="kw">EXCHANGE</span> <span class="kw">ID</span>: <span class="dv">02</span>                                        |</span>
+<span id="cb5-89"><a href="#cb5-89" aria-hidden="true" tabindex="-1"></a>|     HASH_PARTITIONED: c2[#<span class="dv">2</span>]                               |</span>
+<span id="cb5-90"><a href="#cb5-90" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-91"><a href="#cb5-91" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">1</span><span class="ch">:VAGGREGATE</span> (<span class="kw">update</span> serialize)(<span class="dv">361</span>)                     |</span>
+<span id="cb5-92"><a href="#cb5-92" aria-hidden="true" tabindex="-1"></a>|   |  STREAMING                                             |</span>
+<span id="cb5-93"><a href="#cb5-93" aria-hidden="true" tabindex="-1"></a>|   |  output: partial_sum(c1[#<span class="dv">0</span>])[#<span class="dv">3</span>]                       |</span>
+<span id="cb5-94"><a href="#cb5-94" aria-hidden="true" tabindex="-1"></a>|   |  <span class="kw">group</span> <span class="kw">by</span>: c2[#<span class="dv">1</span>]                                      |</span>
+<span id="cb5-95"><a href="#cb5-95" aria-hidden="true" tabindex="-1"></a>|   |  sortByGroupKey<span class="ch">:false</span>                                  |</span>
+<span id="cb5-96"><a href="#cb5-96" aria-hidden="true" tabindex="-1"></a>|   |  <span class="fu">cardinality</span><span class="op">=</span><span class="dv">5</span>                                         |</span>
+<span id="cb5-97"><a href="#cb5-97" aria-hidden="true" tabindex="-1"></a>|   |  distribute expr lists: c1[#<span class="dv">0</span>]                         |</span>
+<span id="cb5-98"><a href="#cb5-98" aria-hidden="true" tabindex="-1"></a>|   |                                                        |</span>
+<span id="cb5-99"><a href="#cb5-99" aria-hidden="true" tabindex="-1"></a>|   <span class="dv">0</span><span class="ch">:VOlapScanNode</span>(<span class="dv">358</span>)                                     |</span>
+<span id="cb5-100"><a href="#cb5-100" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">TABLE</span>: tt.t2(t2), PREAGGREGATION: <span class="kw">ON</span>                  |</span>
+<span id="cb5-101"><a href="#cb5-101" aria-hidden="true" tabindex="-1"></a>|      <span class="kw">partitions</span><span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span> (t2)                                   |</span>
+<span id="cb5-102"><a href="#cb5-102" aria-hidden="true" tabindex="-1"></a>|      tablets<span class="op">=</span><span class="dv">1</span><span class="op">/</span><span class="dv">1</span>, tabletList<span class="op">=</span><span class="dv">491198</span>                        |</span>
+<span id="cb5-103"><a href="#cb5-103" aria-hidden="true" tabindex="-1"></a>|      <span class="fu">cardinality</span><span class="op">=</span><span class="dv">10</span>, avgRowSize<span class="op">=</span><span class="fl">0.0</span>, numNodes<span class="op">=</span><span class="dv">1</span>            |</span>
+<span id="cb5-104"><a href="#cb5-104" aria-hidden="true" tabindex="-1"></a>|      pushAggOp<span class="op">=</span><span class="kw">NONE</span>                                        |</span>
+<span id="cb5-105"><a href="#cb5-105" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-106"><a href="#cb5-106" aria-hidden="true" tabindex="-1"></a>|                                                            |</span>
+<span id="cb5-107"><a href="#cb5-107" aria-hidden="true" tabindex="-1"></a>| <span class="kw">Statistics</span>                                                 |</span>
+<span id="cb5-108"><a href="#cb5-108" aria-hidden="true" tabindex="-1"></a>|  planed <span class="kw">with</span> unknown <span class="kw">column</span> <span class="kw">statistics</span>                     |</span>
+<span id="cb5-109"><a href="#cb5-109" aria-hidden="true" tabindex="-1"></a><span class="op">+</span><span class="co">------------------------------------------------------------+</span></span>
+<span id="cb5-110"><a href="#cb5-110" aria-hidden="true" tabindex="-1"></a><span class="dv">105</span> <span class="kw">rows</span> <span class="kw">in</span> <span class="kw">set</span> (<span class="fl">0.06</span> sec)</span></code></pre></div><h2 id="常见问题">常见问题</h2><p>Bucket Shuffle Join 和 Colocate Join 在应用时对数据分布和 JOIN 条件具有一定限制条件。下面，我们将详细阐述这两种 JOIN 方式各自的具体限制。</p><h3 id="bucket-shuffle-join-的限制">Bucket Shuffle Join 的限制</h3><p>在直接扫描两张物理表以进行 Bucket Shuffle Join 时，需要满足以下条件：</p><ol type="1"><li><strong>等值 JOIN 条件</strong>：Bucket Shuffle Join 仅适用于 JOIN 条件为等值的场景，因为它依赖于 Hash 计算来确定数据分布。</li><li><strong>包含分桶列的等值条件</strong>：等值 JOIN 条件中须包含两张表的分桶列，当左表的分桶列作为等值 JOIN 条件时，更有可能被规划为 Bucket Shuffle Join。</li><li><strong>表类型限制</strong>：Bucket Shuffle Join 仅适用于 Doris 原生的 OLAP 表。对于 ODBC、MySQL、ES 等外部表，当它们作为左表时，Bucket Shuffle Join 无法生效。</li><li><strong>单分区要求</strong>：对于分区表，由于每个分区的数据分布可能不同，Bucket Shuffle Join 仅在左表为单分区时保证有效。因此在执行 SQL 时，应尽可能使用 <code>WHERE</code> 条件来启用分区裁剪策略。</li></ol><h3 id="colocate-join-的限制">Colocate Join 的限制</h3><p>在直接扫描两张物理表时，Colocate Join 相较于 Bucket Shuffle Join 具有更严格的限制条件，除了满足 Bucket Shuffle Join 的所有条件外，还需满足以下要求：</p><ol type="1"><li><strong>分桶列一致</strong>：分桶列的类型和分桶数量必须一致，以确保数据分布的一致性。</li><li><strong>相同 Colocation Group</strong>：需要显式指定 Colocation Group，只有处于相同 Colocation Group 的表才能进行 Colocate Join。</li><li><strong>Group 状态稳定</strong>：在进行副本修复或副本均衡等操作时，Colocation Group 可能处于 Unstable 状态，此时 Colocate Join 将退化为普通的 JOIN 操作。</li></ol>
+</body>
+</html>

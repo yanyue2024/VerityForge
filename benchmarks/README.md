@@ -1,111 +1,62 @@
-# Evaluation Benchmarks
+# 评测资产
 
-`yanyue-operations-v1.blueprint.json` is the portable source for the 33-case operations benchmark. It references
-seed documents by stable aliases and exact titles instead of environment-specific UUIDs. The import script resolves
-those aliases against one knowledge base and compiles the blueprint into the public
-`rag-evaluation-dataset/v1` contract.
+这里保存 VerityForge 当前公开版的可移植蓝图和最终报告。运行数据库、模型凭据和组织内数据不进入仓库。
 
-Validate the source without calling the application:
+## 最终报告
 
-```bash
-./scripts/validate-evaluation-blueprint.sh
-```
+| 报告 | 范围 |
+| --- | --- |
+| [Deep 200 题](deep-rag-final-200-case.md) | `gpt-5.6-luna / low` 的检索、Deep Read、证据覆盖、延迟与 Token |
+| [Fast / Deep 完整回答](fast-vs-deep-full-answer.md) | 5 个困难案例的最终回答、语义 Judge、引用支持与耗时 |
+| [Auto 质量成本](auto-routing-cost-quality.md) | 默认 50% 成本优先档与 28% 质量优先档 |
 
-Compile against the current deployment without importing:
+## 数据蓝图
 
-```bash
-./scripts/import-evaluation-blueprint.sh \
-  --dry-run \
-  --output tmp/benchmarks/yanyue-operations-v1.json
-```
+| 文件 | 内容 |
+| --- | --- |
+| `chinese-enterprise-rag-v1.blueprint.json` | 200 篇语料的完整 440 题评测源 |
+| `chinese-enterprise-agentic-retrieval-v1.blueprint.json` | 200 题 Deep 困难检索集 |
+| `chinese-enterprise-auto-routing-v1.blueprint.json` | 100 Fast + 100 Deep 的路由平衡集 |
+| `chinese-enterprise-rag-v1.sources.json` | 200 篇来源选择、上游 Commit、路径、许可与 Source SHA-256 |
 
-Import once after the seed documents are published:
+同一份完整蓝图也随语料保存在 `data/chinese-enterprise-rag-v1/evaluation/`。仓库提交了 200 个转换后的完整文档，不依赖 Git 忽略目录或另一个版本。
 
-```bash
-./scripts/import-evaluation-blueprint.sh \
-  --output tmp/benchmarks/yanyue-operations-v1.json
-```
+## 验证
 
-Cases with `conversationGroup` and `conversationTurn` run sequentially in one hidden Evaluation conversation.
-Different groups and standalone cases receive independent conversations. The benchmark records quality metrics for
-observation; it does not define a release-blocking threshold. Cases may also declare `forbiddenDocumentAliases`;
-the compiler resolves them to organization-owned document IDs and Evaluation reports Top-10 hits without changing
-Run completion status.
-
-## Chinese enterprise dataset v1
-
-`chinese-enterprise-rag-v1.sources.json` fixes the 200-document selection, upstream commits, source paths, formats,
-licenses, and source SHA-256 values. `chinese-enterprise-rag-v1.blueprint.json` is its portable 440-case evaluation
-source. Generated binary and text corpus files live under the Git-ignored `data/chinese-enterprise-rag-v1/` directory.
-
-Build or verify the corpus from the repository root:
+验证 200 篇文档、四种格式、Manifest、SHA-256、许可和 440 题蓝图：
 
 ```bash
-python3 scripts/build-chinese-enterprise-dataset.py
 python3 scripts/build-chinese-enterprise-dataset.py --verify-only
 ```
 
-Upload the complete corpus and import the evaluation dataset only after all ingestion jobs succeed:
+验证 Auto 路由蓝图可由固定规则重建：
+
+```bash
+python3 scripts/build-auto-routing-benchmark.py --check
+```
+
+需要重新从固定上游 Commit 构建语料时：
+
+```bash
+python3 scripts/build-chinese-enterprise-dataset.py
+```
+
+构建器支持 `--cache-dir`、`--offline`、`--clean-cache` 和 `--refresh-selection`；完整选项见 `--help`。重新下载上游内容时仍应核对来源许可，不要把 VerityForge 的源码许可覆盖到第三方语料。
+
+## 导入
+
+本地 API、Worker、对象存储和模型 Profile 就绪后，可以上传完整语料并导入评测：
 
 ```bash
 scripts/import-chinese-enterprise-dataset.sh
 ```
 
-The builder also supports `--cache-dir`, `--offline`, `--clean-cache`, and `--refresh-selection`; run it with
-`--help` for the complete interface. The upload script reads the local `.env` by default and accepts matching API,
-credential, knowledge-base, concurrency, and timeout overrides.
+导入脚本从本地 `.env` 或显式环境变量读取地址与凭据。不要把访问 Token、密码或运行响应提交到仓库。
 
-## AUTO routing benchmark v1
+## 口径
 
-`chinese-enterprise-auto-routing-v1.blueprint.json` is a deterministic 200-case routing set with 100 `FAST` and
-100 `DEEP` labels. FAST contributes 25 cases from each source project and is balanced across direct facts,
-procedures, source formats, and negative-rejection cases; all single-intent `no_answer` cases are FAST. DEEP keeps
-the 24 genuine cross-document DEEP cases from the base benchmark and adds 76 hard cases stratified by source
-project and Agentic challenge type.
-
-Build or verify the generated blueprint:
-
-```bash
-python3 scripts/build-auto-routing-benchmark.py
-python3 scripts/build-auto-routing-benchmark.py --check
-```
-
-## Agentic RAG v2 reports
-
-`scripts/render-agentic-v2-report.py` renders either a full `RAG` run requested in `DEEP`/`AUTO` mode or a
-`ROUTING_ONLY` run. Persist the complete response from
-`GET /api/v1/evaluation/runs/{runId}` and render it offline so the report remains reproducible after model or
-pipeline configuration changes:
-
-```bash
-python3 scripts/render-agentic-v2-report.py \
-  tmp/benchmarks/<run-id>.json \
-  --output benchmarks/<run-id>.report.md
-```
-
-The default report gate requires a completed run with exactly 200 unique case rows, 200 unique questions, no
-failed cases, and consistent aggregate counts. For every successful full-RAG row that selected `DEEP`, it also
-requires an `agentic-hybrid-v2` runtime snapshot using
-`rewrite-v1+planner-v3+evidence-v2+coverage-v3+gap-v3`, one consistent chat/query-rewrite/rerank model snapshot,
-and a chat profile matching the run's requested model profile. Successful RAG rows must have zero
-`toolFailureCount`, zero `deepReadFailureCount`, and zero `tool.evidence_judge.failed`; successful DEEP rows must
-also have at least one recorded Evidence Judge call. The report independently recomputes the routing
-confusion matrix and decision-source accuracy from case rows instead of trusting aggregate values alone.
-
-Use the matching portable blueprint when rendering a nonstandard dataset or from outside the repository root:
-
-```bash
-python3 scripts/render-agentic-v2-report.py \
-  tmp/benchmarks/<run-id>.json \
-  --blueprint benchmarks/chinese-enterprise-auto-routing-v1.blueprint.json \
-  --output benchmarks/<run-id>.report.md
-```
-
-Smoke runs can change the cardinality with `--expected-rows`. `--allow-failures`, `--allow-incomplete`, and
-`--allow-tool-failures` are explicit diagnostic-only escapes that preserve degraded results in the generated
-Markdown. `--allow-tool-failures` waives all four tool-health checks above, records every violation as a warning,
-and marks the report's tool-health gate as `WAIVED`; it does not turn a degraded run into a strict pass. Runtime
-snapshots that are mixed or differ from the expected v2 values remain a hard error unless
-`--allow-mixed-runtime` is supplied, in which case every mismatch is recorded as a report warning.
-`--expected-model-profile-id`, `--expected-pipeline-version`, and `--expected-prompt-version` can pin an
-independently known deployment snapshot.
+- 200 题主报告设置 `answerGenerationSkipped=true`，只测研究阶段。
+- 5 题报告完整执行回答和引用 Judge，但样本量不足以替代主回归。
+- Auto 回放双方都跳过最终回答，节省率不是完整对话账单。
+- 失败续跑保留成功 Artifact，并在实际成本中计入失败物理尝试。
+- 历史 Pipeline 字符串仅用于识别已保存 Artifact；当前实现统一为 `deep-rag-final`。

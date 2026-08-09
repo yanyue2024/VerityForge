@@ -4,12 +4,8 @@ import com.yanyue.rag.contract.chat.CreateRunRequest;
 import com.yanyue.rag.contract.chat.RunAcceptedResponse;
 import com.yanyue.rag.contract.chat.RunMode;
 import com.yanyue.rag.contract.chat.StreamEventType;
-import com.yanyue.rag.application.pipeline.PipelineConfigService;
+import com.yanyue.rag.application.chat.deep.DeepRagPipeline;
 import com.yanyue.rag.application.telemetry.RagTelemetry;
-import com.yanyue.rag.domain.agent.FactStatus;
-import com.yanyue.rag.domain.port.AgentRecoveryPort;
-import com.yanyue.rag.domain.port.AgenticV4RecoveryPort;
-import com.yanyue.rag.domain.port.AgentReactPersistencePort;
 import com.yanyue.rag.domain.port.RunRecordPort;
 import java.util.Locale;
 import java.util.UUID;
@@ -20,54 +16,28 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.context.event.ContextRefreshedEvent;
-import org.springframework.context.event.EventListener;
-import org.springframework.beans.factory.annotation.Autowired;
 
 @Service
 public class RunCoordinator {
     private final FastRagPipeline fastPipeline;
-    private final AgenticRagPipeline agenticPipeline;
+    private final DeepRagPipeline deepPipeline;
     private final RunEventHub events;
     private final ExecutorService executor;
     private final RunRecordPort runRecords;
-    private final PipelineConfigService pipelineConfigs;
-    private final AgentStructuredReasoner reasoner;
     private final AutoModeRouter autoModeRouter;
-    private final AgentRecoveryPort recovery;
-    private final AgentReactPersistencePort reactPersistence;
-    private AgenticV4RecoveryPort v4Recovery;
     private final RagTelemetry telemetry;
     private final ConcurrentHashMap<UUID, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
-    public RunCoordinator(FastRagPipeline fastPipeline, AgenticRagPipeline agenticPipeline, RunEventHub events,
+    public RunCoordinator(FastRagPipeline fastPipeline, DeepRagPipeline deepPipeline, RunEventHub events,
                           @Qualifier("ragRunExecutor") ExecutorService executor, RunRecordPort runRecords,
-                          PipelineConfigService pipelineConfigs, AgentStructuredReasoner reasoner,
-                          AgentRecoveryPort recovery, AgentReactPersistencePort reactPersistence,
                           RagTelemetry telemetry, AutoModeRouter autoModeRouter) {
         this.fastPipeline = fastPipeline;
-        this.agenticPipeline = agenticPipeline;
+        this.deepPipeline = deepPipeline;
         this.events = events;
         this.executor = executor;
         this.runRecords = runRecords;
-        this.pipelineConfigs = pipelineConfigs;
-        this.reasoner = reasoner;
         this.autoModeRouter = autoModeRouter;
-        this.recovery = recovery;
-        this.reactPersistence = reactPersistence;
         this.telemetry = telemetry;
-    }
-
-    @Autowired
-    public RunCoordinator(FastRagPipeline fastPipeline, AgenticRagPipeline agenticPipeline, RunEventHub events,
-                          @Qualifier("ragRunExecutor") ExecutorService executor, RunRecordPort runRecords,
-                          PipelineConfigService pipelineConfigs, AgentStructuredReasoner reasoner,
-                          AgentRecoveryPort recovery, AgentReactPersistencePort reactPersistence,
-                          RagTelemetry telemetry, AgenticV4RecoveryPort v4Recovery,
-                          AutoModeRouter autoModeRouter) {
-        this(fastPipeline, agenticPipeline, events, executor, runRecords, pipelineConfigs, reasoner,
-                recovery, reactPersistence, telemetry, autoModeRouter);
-        this.v4Recovery = v4Recovery;
     }
 
     public RunAcceptedResponse start(UUID organizationId, UUID userId, UUID conversationId, CreateRunRequest request) {
@@ -135,119 +105,6 @@ public class RunCoordinator {
         return cancelled || future == null;
     }
 
-    @EventListener(ContextRefreshedEvent.class)
-    public void recoverInterruptedAgentRuns(ContextRefreshedEvent ignored) {
-        if (v4Recovery != null) {
-            for (var run : v4Recovery.findRecoverableRuns()) {
-                if (activeRuns.containsKey(run.runId())) continue;
-                var task = new FutureTask<Void>(() -> {
-                    recoverV4(run);
-                    return null;
-                });
-                if (activeRuns.putIfAbsent(run.runId(), task) == null) executor.execute(task);
-            }
-        }
-        for (var run : recovery.findRecoverableRuns()) {
-            if (activeRuns.containsKey(run.runId())) continue;
-            var task = new FutureTask<Void>(() -> {
-                recover(run);
-                return null;
-            });
-            if (activeRuns.putIfAbsent(run.runId(), task) == null) executor.execute(task);
-        }
-        for (var run : reactPersistence.findRecoverableRuns()) {
-            if (activeRuns.containsKey(run.runId())) continue;
-            var task = new FutureTask<Void>(() -> recoverReact(run), null);
-            if (activeRuns.putIfAbsent(run.runId(), task) == null) executor.execute(task);
-        }
-    }
-
-    private void recoverV4(AgenticV4RecoveryPort.RecoverableRun run) {
-        try {
-            runRecords.markRunning(run.runId(), RunMode.DEEP);
-            v4Recovery.prepareForRecovery(run.runId());
-            var snapshot = v4Recovery.loadSnapshot(run.runId())
-                    .orElseThrow(() -> new IllegalStateException("缺少 checkpoint schema 3"));
-            events.publish(run.runId(), StreamEventType.RUN_RECOVERED, java.util.Map.of(
-                    "strategy", "resume-v4-barrier", "checkpointVersion", 3,
-                    "checkpointStage", snapshot.stage()));
-            var answer = agenticPipeline.resumeV4(run, snapshot);
-            runRecords.complete(run.runId());
-            events.publish(run.runId(), StreamEventType.RUN_COMPLETED,
-                    java.util.Map.of("answerLength", answer.length(), "selectedMode", RunMode.DEEP,
-                            "recovered", true, "checkpointVersion", 3));
-        } catch (CancellationException exception) {
-            Thread.currentThread().interrupt();
-        } catch (Exception exception) {
-            if (Thread.currentThread().isInterrupted()) return;
-            var message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            runRecords.fail(run.runId(), message, stopReason(exception));
-            events.publish(run.runId(), StreamEventType.RUN_FAILED,
-                    java.util.Map.of("message", message,
-                            "recovered", true, "checkpointVersion", 3));
-        } finally {
-            activeRuns.remove(run.runId());
-        }
-    }
-
-    private void recoverReact(com.yanyue.rag.domain.agent.react.ReactRecoverableRun run) {
-        try {
-            runRecords.markRunning(run.runId(), RunMode.DEEP);
-            reactPersistence.prepareForRecovery(run.runId());
-            events.publish(run.runId(), StreamEventType.RUN_RECOVERED,
-                    java.util.Map.of("strategy", "resume-react-checkpoint", "checkpointVersion", 2));
-            var answer = agenticPipeline.executeReact(run.runId(), run.conversationId(), run.organizationId(),
-                    run.userId(), run.request());
-            runRecords.complete(run.runId());
-            events.publish(run.runId(), StreamEventType.RUN_COMPLETED,
-                    java.util.Map.of("answerLength", answer.length(), "selectedMode", RunMode.DEEP, "recovered", true));
-        } catch (CancellationException exception) {
-            Thread.currentThread().interrupt();
-        } catch (Exception exception) {
-            if (Thread.currentThread().isInterrupted()) return;
-            var message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            runRecords.fail(run.runId(), message);
-            events.publish(run.runId(), StreamEventType.RUN_FAILED,
-                    java.util.Map.of("message", message, "recovered", true));
-        } finally {
-            activeRuns.remove(run.runId());
-        }
-    }
-
-    private void recover(AgentRecoveryPort.RecoverableRun run) {
-        try {
-            runRecords.markRunning(run.runId(), RunMode.DEEP);
-            var snapshot = recovery.loadSnapshot(run.runId()).orElse(null);
-            var canResumeSynthesis = snapshot != null && snapshot.facts().stream()
-                    .anyMatch(fact -> fact.status() == FactStatus.ACCEPTED);
-            events.publish(run.runId(), StreamEventType.RUN_RECOVERED, java.util.Map.of(
-                    "strategy", canResumeSynthesis ? "resume-synthesis" : "restart-plan",
-                    "checkpointStage", snapshot == null ? "NONE" : snapshot.state().stage().name()));
-            var answer = canResumeSynthesis
-                    ? agenticPipeline.resumeFromCheckpoint(run, snapshot)
-                    : restartAgentRun(run);
-            runRecords.complete(run.runId());
-            events.publish(run.runId(), StreamEventType.RUN_COMPLETED,
-                    java.util.Map.of("answerLength", answer.length(), "selectedMode", RunMode.DEEP,
-                            "recovered", true));
-        } catch (CancellationException exception) {
-            Thread.currentThread().interrupt();
-        } catch (Exception exception) {
-            if (Thread.currentThread().isInterrupted()) return;
-            var message = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
-            runRecords.fail(run.runId(), message);
-            events.publish(run.runId(), StreamEventType.RUN_FAILED,
-                    java.util.Map.of("message", message, "recovered", true));
-        } finally {
-            activeRuns.remove(run.runId());
-        }
-    }
-
-    private String restartAgentRun(AgentRecoveryPort.RecoverableRun run) {
-        recovery.resetIncompleteReasoning(run.runId());
-        return agenticPipeline.execute(
-                run.runId(), run.conversationId(), run.organizationId(), run.userId(), run.request());
-    }
 
     private void execute(
             UUID runId,
@@ -291,7 +148,7 @@ public class RunCoordinator {
             var answer = telemetry.observe("rag.run", java.util.Map.of(
                     "mode", selected.name(), "requested_mode", request.mode().name()),
                     () -> selected == RunMode.DEEP
-                            ? agenticPipeline.execute(runId, conversationId, organizationId, userId, request)
+                            ? deepPipeline.execute(runId, conversationId, organizationId, userId, request, true)
                             : fastPipeline.execute(runId, conversationId, organizationId, userId, request,
                                     routePlan.preflight()));
             runRecords.complete(runId);
@@ -329,8 +186,8 @@ public class RunCoordinator {
                     "mode", RunMode.DEEP.name(),
                     "requested_mode", RunMode.DEEP.name(),
                     "answer_generation", "skipped"),
-                    () -> agenticPipeline.executeRetrievalOnly(
-                            runId, conversationId, organizationId, userId, request));
+                    () -> deepPipeline.execute(
+                            runId, conversationId, organizationId, userId, request, false));
             runRecords.complete(runId);
             events.publish(runId, StreamEventType.RUN_COMPLETED,
                     java.util.Map.of("answerLength", 0, "selectedMode", RunMode.DEEP,

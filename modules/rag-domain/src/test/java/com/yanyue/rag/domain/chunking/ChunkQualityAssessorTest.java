@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.yanyue.rag.contract.parser.BlockType;
-import com.yanyue.rag.domain.chunking.v4.OffsetUnit;
+import com.yanyue.rag.domain.chunking.OffsetUnit;
 import com.yanyue.rag.domain.knowledge.ChunkPolicy;
 import com.yanyue.rag.domain.knowledge.DocumentBlock;
 import java.util.List;

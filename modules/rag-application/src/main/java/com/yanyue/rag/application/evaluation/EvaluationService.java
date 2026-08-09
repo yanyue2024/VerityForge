@@ -61,6 +61,8 @@ public class EvaluationService {
     private static final String CONVERSATION_GROUP = "conversationGroup";
     private static final String CONVERSATION_TURN = "conversationTurn";
     private static final Duration CASE_TIMEOUT = Duration.ofMinutes(15);
+    private static final java.util.Set<String> CONTROLLED_DEEP_PIPELINES = java.util.Set.of(
+            "agentic-rag-v4", "agentic-rag-v5", "agentic-rag-v7", "agentic-rag-v8", "deep-rag-final");
 
     private final EvaluationRepository repository;
     private final RetrievalPort retrieval;
@@ -468,8 +470,7 @@ public class EvaluationService {
         if (RunMode.DEEP.name().equals(metrics.get("selectedMode"))) {
             if (!(metrics.get("runtimeSnapshot") instanceof Map<?, ?> runtime) || runtime.isEmpty()) return false;
             var pipelineVersion = String.valueOf(runtime.get("pipelineVersion"));
-            if (java.util.Set.of("agentic-rag-v4", "agentic-rag-v5", "agentic-rag-v7", "agentic-rag-v8")
-                    .contains(pipelineVersion)) {
+            if (CONTROLLED_DEEP_PIPELINES.contains(pipelineVersion)) {
                 return reusableControlledAgenticResult(metrics, expectedExecution, pipelineVersion);
             }
         }
@@ -1155,8 +1156,7 @@ public class EvaluationService {
         if (!RunMode.DEEP.name().equals(String.valueOf(metrics.get("selectedMode")))) return null;
         if (!(metrics.get("runtimeSnapshot") instanceof Map<?, ?> runtime)) return null;
         var pipelineVersion = String.valueOf(runtime.get("pipelineVersion"));
-        if (!java.util.Set.of("agentic-rag-v4", "agentic-rag-v5", "agentic-rag-v7", "agentic-rag-v8")
-                .contains(pipelineVersion)) return null;
+        if (!CONTROLLED_DEEP_PIPELINES.contains(pipelineVersion)) return null;
         if (!(metrics.get("toolDiagnostics") instanceof Map<?, ?> diagnostics)) {
             return "Controlled Agentic RAG diagnostics are missing";
         }
@@ -1180,7 +1180,7 @@ public class EvaluationService {
         var judgeCallCount = number(diagnostics.get("judgeCallCount"));
         var primaryGoalCount = number(diagnostics.get("primaryGoalCount"));
         return judgeCallCount == 1
-                || ("agentic-rag-v8".equals(pipelineVersion)
+                || (java.util.Set.of("agentic-rag-v8", "deep-rag-final").contains(pipelineVersion)
                     && primaryGoalCount > 0
                     && judgeCallCount == primaryGoalCount);
     }

@@ -8,9 +8,7 @@ public interface RetrievalPort {
     List<RetrievalHit> keywordSearch(String query, RetrievalScope scope, int topK);
     List<RetrievalHit> semanticSearch(String query, RetrievalScope scope, int topK, int overFetch);
 
-    /**
-     * v4 的严格语义检索入口。实现不得在语义索引不可用时切换为关键词检索。
-     */
+    /** Strict semantic retrieval must not fall back to keyword retrieval. */
     default List<RetrievalHit> semanticSearchStrict(String query, RetrievalScope scope, int topK, int overFetch) {
         return semanticSearch(query, scope, topK, overFetch);
     }

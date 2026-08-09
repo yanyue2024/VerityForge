@@ -1,10 +1,10 @@
 package com.yanyue.rag.domain.chunking;
 
 import com.yanyue.rag.contract.parser.BlockType;
-import com.yanyue.rag.domain.chunking.v4.ChunkSourceMap;
-import com.yanyue.rag.domain.chunking.v4.ChunkSourceMapBuilder;
-import com.yanyue.rag.domain.chunking.v4.OffsetUnit;
-import com.yanyue.rag.domain.chunking.v4.SourceBlockSlice;
+import com.yanyue.rag.domain.chunking.ChunkSourceMap;
+import com.yanyue.rag.domain.chunking.ChunkSourceMapBuilder;
+import com.yanyue.rag.domain.chunking.OffsetUnit;
+import com.yanyue.rag.domain.chunking.SourceBlockSlice;
 import com.yanyue.rag.domain.knowledge.Chunk;
 import com.yanyue.rag.domain.knowledge.ChunkPolicy;
 import com.yanyue.rag.domain.knowledge.ChunkType;

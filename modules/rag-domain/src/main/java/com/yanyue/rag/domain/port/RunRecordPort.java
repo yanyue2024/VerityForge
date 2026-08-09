@@ -29,40 +29,14 @@ public interface RunRecordPort {
     void markRunning(UUID runId, RunMode selectedMode);
     void applyRuntime(UUID runId, PipelineConfig config, UUID chatProfileId);
 
-    default void applyAgentHybridRuntime(UUID runId, PipelineConfig config, UUID chatProfileId) {
-        applyRuntime(runId, config, chatProfileId);
-    }
-
-    default void applyAgentV4Runtime(UUID runId, PipelineConfig config, UUID chatProfileId) {
-        applyRuntime(runId, config, chatProfileId);
-    }
-
-    default void applyAgentV5Runtime(
-            UUID runId,
-            PipelineConfig config,
-            UUID chatProfileId,
-            Map<String, Object> effectiveLimits
-    ) {
-        applyRuntime(runId, config, chatProfileId);
-    }
-
-    default void applyAgentV7Runtime(
-            UUID runId,
-            PipelineConfig config,
-            UUID chatProfileId,
-            Map<String, Object> effectiveLimits
-    ) {
-        applyAgentV5Runtime(runId, config, chatProfileId, effectiveLimits);
-    }
-
-    default void applyAgentV8Runtime(
+    default void applyDeepRuntime(
             UUID runId,
             PipelineConfig config,
             UUID chatProfileId,
             Map<String, Object> effectiveLimits,
             String promptVersion
     ) {
-        applyAgentV7Runtime(runId, config, chatProfileId, effectiveLimits);
+        applyRuntime(runId, config, chatProfileId);
     }
 
     default void applyAgentRuntime(UUID runId, PipelineConfig config, UUID chatProfileId) {

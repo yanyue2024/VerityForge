@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>通过 ConfigMap 更新配置</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">通过 ConfigMap 更新配置</h1>
+</header>
+<h1 id="通过-configmap-更新配置">通过 ConfigMap 更新配置</h1><p>本页提供了通过 ConfigMap 更新 Pod 中配置信息的分步示例， 本教程的前置任务是配置 Pod 以使用 ConfigMap。 在本教程结束时，你将了解如何变更运行中应用的配置。 本教程以 <code>alpine</code> 和 <code>nginx</code> 镜像为例。</p><h2></h2><p>你需要有 curl 命令行工具，用于从终端或命令行界面发出 HTTP 请求。 如果你没有 <code>curl</code>，可以安装此工具。请查阅你本地操作系统的文档。</p><h2 id="-1"></h2><ul><li>通过作为卷挂载的 ConfigMap 更新配置</li><li>通过 ConfigMap 更新 Pod 的环境变量</li><li>在多容器 Pod 中通过 ConfigMap 更新配置</li><li>在包含边车容器的 Pod 中通过 ConfigMap 更新配置</li></ul><h2 id="通过作为卷挂载的-configmap-更新配置-rollout-configmap-volume">通过作为卷挂载的 ConfigMap 更新配置 {#rollout-configmap-volume}</h2><p>使用 <code>kubectl create configmap</code> 命令基于字面值创建一个 ConfigMap：</p><pre class="shell"><code>kubectl create configmap sport --from-literal=sport=football</code></pre><p>下面是一个 Deployment 清单示例，其中 ConfigMap <code>sport</code> 作为挂载到 Pod 的唯一容器中。</p><p>创建此 Deployment：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/deployments/deployment-with-configmap-as-volume.yaml</code></pre><p>检查此 Deployment 的 Pod 以确保它们已就绪 （通过进行匹配）：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=configmap-volume</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>NAME                                READY   STATUS    RESTARTS   AGE
+configmap-volume-6b976dfdcf-qxvbm   1/1     Running   0          72s
+configmap-volume-6b976dfdcf-skpvm   1/1     Running   0          72s
+configmap-volume-6b976dfdcf-tbc6r   1/1     Running   0          72s</code></pre><p>在运行这些 Pod 之一的每个节点上，kubelet 获取该 ConfigMap 的数据，并将其转换为本地卷中的文件。 然后，kubelet 按照 Pod 模板中指定的方式将该卷挂载到容器中。 在该容器中运行的代码从文件中加载信息，并使用它将报告打印到标准输出。 你可以通过查看该 Deployment 中其中一个 Pod 的日志来检查此报告：</p><pre class="shell"><code># 选择一个属于该 Deployment 的 Pod，并查看其日志
+kubectl logs deployments/configmap-volume</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>Found 3 pods, using pod/configmap-volume-76d9c5678f-x5rgj
+Thu Jan  4 14:06:46 UTC 2024 My preferred sport is football
+Thu Jan  4 14:06:56 UTC 2024 My preferred sport is football
+Thu Jan  4 14:07:06 UTC 2024 My preferred sport is football
+Thu Jan  4 14:07:16 UTC 2024 My preferred sport is football
+Thu Jan  4 14:07:26 UTC 2024 My preferred sport is football</code></pre><p>编辑 ConfigMap：</p><pre class="shell"><code>kubectl edit configmap sport</code></pre><p>在出现的编辑器中，将键 <code>sport</code> 的值从 <code>football</code> 变更为 <code>cricket</code>。 保存你的变更。kubectl 工具会相应地更新 ConfigMap（如果报错，请重试）。</p><p>以下是你编辑后该清单可能的样子：</p><div class="sourceCode" id="cb8"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span><span class="kw">:</span></span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">sport</span><span class="kw">:</span><span class="at"> cricket</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="fu">kind</span><span class="kw">:</span><span class="at"> ConfigMap</span></span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 你可以保留现有的 metadata 不变。</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 你将看到的值与本例的值不会完全一样。</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">creationTimestamp</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2024-01-04T14:05:06Z&quot;</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> sport</span></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">namespace</span><span class="kw">:</span><span class="at"> default</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resourceVersion</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;1743935&quot;</span></span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uid</span><span class="kw">:</span><span class="at"> 024ee001-fe72-487e-872e-34d6464a8a23</span></span></code></pre></div><p>你应该会看到以下输出：</p><pre><code>configmap/sport edited</code></pre><p>查看属于此 Deployment 的 Pod 之一的日志（并跟踪最新写入的条目）：</p><pre class="shell"><code>kubectl logs deployments/configmap-volume --follow</code></pre><p>几秒钟后，你应该会看到日志输出中的如下变化：</p><pre><code>Thu Jan  4 14:11:36 UTC 2024 My preferred sport is football
+Thu Jan  4 14:11:46 UTC 2024 My preferred sport is football
+Thu Jan  4 14:11:56 UTC 2024 My preferred sport is football
+Thu Jan  4 14:12:06 UTC 2024 My preferred sport is cricket
+Thu Jan  4 14:12:16 UTC 2024 My preferred sport is cricket</code></pre><p>当你有一个 ConfigMap 通过 <code>configMap</code> 卷或 <code>projected</code> 卷映射到运行中的 Pod， 并且你更新了该 ConfigMap 时，运行中的 Pod 几乎会立即更新。 但是，你的应用只有在编写为轮询变更或监视文件更新时才能看到变更。 启动时一次性加载其配置的应用将不会注意到变更。</p><p>从更新 ConfigMap 的那一刻到将新的键投射到 Pod 的那一刻，整个延迟可能与 kubelet 同步周期相同。 另请参阅挂载的 ConfigMap 会被自动更新。</p><h2 id="通过-configmap-更新-pod-的环境变量-rollout-configmap-env">通过 ConfigMap 更新 Pod 的环境变量 {#rollout-configmap-env}</h2><p>使用 <code>kubectl create configmap</code> 命令基于字面值创建一个 ConfigMap：</p><pre class="shell"><code>kubectl create configmap fruits --from-literal=fruits=apples</code></pre><p>下面是一个 Deployment 清单的示例，包含一个通过 ConfigMap <code>fruits</code> 配置的环境变量。</p><p>创建此 Deployment：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/deployments/deployment-with-configmap-as-envvar.yaml</code></pre><p>检查此 Deployment 的 Pod 以确保它们已就绪（通过进行匹配）：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=configmap-env-var</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>NAME                                 READY   STATUS    RESTARTS   AGE
+configmap-env-var-59cfc64f7d-74d7z   1/1     Running   0          46s
+configmap-env-var-59cfc64f7d-c4wmj   1/1     Running   0          46s
+configmap-env-var-59cfc64f7d-dpr98   1/1     Running   0          46s</code></pre><p>ConfigMap 中的键值对被配置为 Pod 容器中的环境变量。 通过查看属于该 Deployment 的某个 Pod 的日志来检查这一点。</p><pre class="shell"><code>kubectl logs deployment/configmap-env-var</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>Found 3 pods, using pod/configmap-env-var-7c994f7769-l74nq
+Thu Jan  4 16:07:06 UTC 2024 The basket is full of apples
+Thu Jan  4 16:07:16 UTC 2024 The basket is full of apples
+Thu Jan  4 16:07:26 UTC 2024 The basket is full of apples</code></pre><p>编辑 ConfigMap：</p><pre class="shell"><code>kubectl edit configmap fruits</code></pre><p>在出现的编辑器中，将键 <code>fruits</code> 的值从 <code>apples</code> 变更为 <code>mangoes</code>。 保存你的变更。kubectl 工具会相应地更新 ConfigMap（如果报错，请重试）。</p><p>以下是你编辑后该清单可能的样子：</p><div class="sourceCode" id="cb19"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb19-1"><a href="#cb19-1" aria-hidden="true" tabindex="-1"></a><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb19-2"><a href="#cb19-2" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span><span class="kw">:</span></span>
+<span id="cb19-3"><a href="#cb19-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">fruits</span><span class="kw">:</span><span class="at"> mangoes</span></span>
+<span id="cb19-4"><a href="#cb19-4" aria-hidden="true" tabindex="-1"></a><span class="fu">kind</span><span class="kw">:</span><span class="at"> ConfigMap</span></span>
+<span id="cb19-5"><a href="#cb19-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 你可以保留现有的 metadata 不变。</span></span>
+<span id="cb19-6"><a href="#cb19-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 你将看到的值与本例的值不会完全一样。</span></span>
+<span id="cb19-7"><a href="#cb19-7" aria-hidden="true" tabindex="-1"></a><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">creationTimestamp</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2024-01-04T16:04:19Z&quot;</span></span>
+<span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> fruits</span></span>
+<span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">namespace</span><span class="kw">:</span><span class="at"> default</span></span>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resourceVersion</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;1749472&quot;</span></span></code></pre></div><p>你应该看到以下输出：</p><pre><code>configmap/fruits edited</code></pre><p>查看此 Deployment 的日志，并观察几秒钟的输出：</p><pre class="shell"><code># 如上所述，输出不会有变化
+kubectl logs deployments/configmap-env-var --follow</code></pre><p>请注意，即使你编辑了 ConfigMap，输出仍然<strong>没有变化</strong>：</p><pre><code>Thu Jan  4 16:12:56 UTC 2024 The basket is full of apples
+Thu Jan  4 16:13:06 UTC 2024 The basket is full of apples
+Thu Jan  4 16:13:16 UTC 2024 The basket is full of apples
+Thu Jan  4 16:13:26 UTC 2024 The basket is full of apples</code></pre><p>尽管 ConfigMap 中的键的取值已经变更，Pod 中的环境变量仍然显示先前的值。 这是因为当源数据变更时，在 Pod 内运行的进程的环境变量<strong>不会</strong>被更新； 如果你想强制更新，需要让 Kubernetes 替换现有的 Pod。新 Pod 将使用更新的信息来运行。</p><p>你可以触发该替换。使用 <code>kubectl rollout</code> 为 Deployment 执行上线操作：</p><pre class="shell"><code># 触发上线操作
+kubectl rollout restart deployment configmap-env-var
+
+# 等待上线操作完成
+kubectl rollout status deployment configmap-env-var --watch=true</code></pre><p>接下来，检查 Deployment：</p><pre class="shell"><code>kubectl get deployment configmap-env-var</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>NAME                READY   UP-TO-DATE   AVAILABLE   AGE
+configmap-env-var   3/3     3            3           12m</code></pre><p>检查 Pod：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=configmap-env-var</code></pre><p>上线操作会导致 Kubernetes 为 Deployment 新建一个 ； 这意味着现有的 Pod 最终会终止，并创建新的 Pod。几秒钟后，你应该会看到类似以下的输出：</p><pre><code>NAME                                 READY   STATUS        RESTARTS   AGE
+configmap-env-var-6d94d89bf5-2ph2l   1/1     Running       0          13s
+configmap-env-var-6d94d89bf5-74twx   1/1     Running       0          8s
+configmap-env-var-6d94d89bf5-d5vx8   1/1     Running       0          11s</code></pre><p>请等待旧的 Pod 完全终止后再进行下一步。</p><p>查看此 Deployment 中某个 Pod 的日志：</p><pre class="shell"><code># 选择属于 Deployment 的一个 Pod，并查看其日志
+kubectl logs deployment/configmap-env-var</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>Found 3 pods, using pod/configmap-env-var-6d9ff89fb6-bzcf6
+Thu Jan  4 16:30:35 UTC 2024 The basket is full of mangoes
+Thu Jan  4 16:30:45 UTC 2024 The basket is full of mangoes
+Thu Jan  4 16:30:55 UTC 2024 The basket is full of mangoes</code></pre><p>这个场景演示了在 Pod 中如何更新从 ConfigMap 派生的环境变量。ConfigMap 值的变更在随后的上线操作期间被应用到 Pod。如果 Pod 由于其他原因（例如 Deployment 扩容）被创建， 那么新 Pod 也会使用最新的配置值； 如果你不触发上线操作，你可能会发现你的应用在运行过程中混用了新旧环境变量值。</p><h2 id="在多容器-pod-中通过-configmap-更新配置-rollout-configmap-multiple-containers">在多容器 Pod 中通过 ConfigMap 更新配置 {#rollout-configmap-multiple-containers}</h2><p>使用 <code>kubectl create configmap</code> 命令基于字面值创建一个 ConfigMap：</p><pre class="shell"><code>kubectl create configmap color --from-literal=color=red</code></pre><p>下面是一个 Deployment 清单的示例，该 Deployment 管理一组 Pod，每个 Pod 有两个容器。 这两个容器共享一个 <code>emptyDir</code> 卷并使用此卷进行通信。第一个容器运行 Web 服务器（<code>nginx</code>）。 在 Web 服务器容器中共享卷的挂载路径是 <code>/usr/share/nginx/html</code>。 第二个辅助容器基于 <code>alpine</code>，对于这个容器，<code>emptyDir</code> 卷被挂载在 <code>/pod-data</code>。 辅助容器生成一个 HTML 文件，其内容基于 ConfigMap。Web 服务器容器通过 HTTP 提供此 HTML 文件。</p><p>创建此 Deployment：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/deployments/deployment-with-configmap-two-containers.yaml</code></pre><p>检查此 Deployment 的 Pod 以确保它们已就绪（通过进行匹配）：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=configmap-two-containers</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>NAME                                        READY   STATUS    RESTARTS   AGE
+configmap-two-containers-565fb6d4f4-2xhxf   2/2     Running   0          20s
+configmap-two-containers-565fb6d4f4-g5v4j   2/2     Running   0          20s
+configmap-two-containers-565fb6d4f4-mzsmf   2/2     Running   0          20s</code></pre><p>公开 Deployment（<code>kubectl</code> 工具会为你创建 ）：</p><pre class="shell"><code>kubectl expose deployment configmap-two-containers --name=configmap-service --port=8080 --target-port=80</code></pre><p>使用 <code>kubectl</code> 转发端口：</p><pre class="shell"><code># 此命令将在后台运行
+kubectl port-forward service/configmap-service 8080:8080 &amp;</code></pre><p>访问服务：</p><pre class="shell"><code>curl http://localhost:8080</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>Fri Jan  5 08:08:22 UTC 2024 My preferred color is red</code></pre><p>编辑 ConfigMap：</p><pre class="shell"><code>kubectl edit configmap color</code></pre><p>在出现的编辑器中，将键 <code>color</code> 的值从 <code>red</code> 变更为 <code>blue</code>。 保存你的变更。kubectl 工具会相应地更新 ConfigMap（如果报错，请重试）。</p><p>以下是你编辑后该清单可能的样子：</p><div class="sourceCode" id="cb39"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb39-1"><a href="#cb39-1" aria-hidden="true" tabindex="-1"></a><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb39-2"><a href="#cb39-2" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span><span class="kw">:</span></span>
+<span id="cb39-3"><a href="#cb39-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">color</span><span class="kw">:</span><span class="at"> blue</span></span>
+<span id="cb39-4"><a href="#cb39-4" aria-hidden="true" tabindex="-1"></a><span class="fu">kind</span><span class="kw">:</span><span class="at"> ConfigMap</span></span>
+<span id="cb39-5"><a href="#cb39-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 你可以保留现有的 metadata 不变。</span></span>
+<span id="cb39-6"><a href="#cb39-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 你将看到的值与本例的值不会完全一样。</span></span>
+<span id="cb39-7"><a href="#cb39-7" aria-hidden="true" tabindex="-1"></a><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb39-8"><a href="#cb39-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">creationTimestamp</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2024-01-05T08:12:05Z&quot;</span></span>
+<span id="cb39-9"><a href="#cb39-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> color</span></span>
+<span id="cb39-10"><a href="#cb39-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">namespace</span><span class="kw">:</span><span class="at"> configmap</span></span>
+<span id="cb39-11"><a href="#cb39-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resourceVersion</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;1801272&quot;</span></span>
+<span id="cb39-12"><a href="#cb39-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uid</span><span class="kw">:</span><span class="at"> 80d33e4a-cbb4-4bc9-ba8c-544c68e425d6</span></span></code></pre></div><p>循环访问服务 URL 几秒钟。</p><pre class="shell"><code># 当你满意时可以取消此操作（Ctrl-C）
+while true; do curl --connect-timeout 7.5 http://localhost:8080; sleep 10; done</code></pre><p>你应该会看到如下的输出变化：</p><pre><code>Fri Jan  5 08:14:00 UTC 2024 My preferred color is red
+Fri Jan  5 08:14:02 UTC 2024 My preferred color is red
+Fri Jan  5 08:14:20 UTC 2024 My preferred color is red
+Fri Jan  5 08:14:22 UTC 2024 My preferred color is red
+Fri Jan  5 08:14:32 UTC 2024 My preferred color is blue
+Fri Jan  5 08:14:43 UTC 2024 My preferred color is blue
+Fri Jan  5 08:15:00 UTC 2024 My preferred color is blue</code></pre><h2 id="在包含边车容器的-pod-中通过-configmap-更新配置-rollout-configmap-sidecar">在包含边车容器的 Pod 中通过 ConfigMap 更新配置 {#rollout-configmap-sidecar}</h2><p>要重现上述场景，可以使用边车容器作为辅助容器来写入 HTML 文件。由于边车容器在概念上是一个 Init 容器，因此保证会在主要 Web 服务器容器启动之前启动。 这确保了当 Web 服务器准备好提供服务时，HTML 文件始终可用。</p><p>如果你从前一个场景继续操作，你可以在此场景中重用名为 <code>color</code> 的 ConfigMap。 如果你是独立执行此场景，请使用 <code>kubectl create configmap</code> 命令基于字面值创建一个 ConfigMap：</p><pre class="shell"><code>kubectl create configmap color --from-literal=color=blue</code></pre><p>以下是一个 Deployment 清单示例，该 Deployment 管理一组 Pod，每个 Pod 有一个主容器和一个边车容器。 这两个容器共享一个 <code>emptyDir</code> 卷并使用此卷来通信。主容器运行 Web 服务器（NGINX）。 在 Web 服务器容器中共享卷的挂载路径是 <code>/usr/share/nginx/html</code>。 第二个容器是基于 Alpine Linux 作为辅助容器的边车容器。对于这个辅助容器，<code>emptyDir</code> 卷被挂载在 <code>/pod-data</code>。 边车容器写入一个 HTML 文件，其内容基于 ConfigMap。Web 服务器容器通过 HTTP 提供此 HTML 文件。</p><p>创建此 Deployment：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/deployments/deployment-with-configmap-and-sidecar-container.yaml</code></pre><p>检查此 Deployment 的 Pod 以确保它们已就绪（通过进行匹配）：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=configmap-sidecar-container</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>NAME                                           READY   STATUS    RESTARTS   AGE
+configmap-sidecar-container-5fb59f558b-87rp7   2/2     Running   0          94s
+configmap-sidecar-container-5fb59f558b-ccs7s   2/2     Running   0          94s
+configmap-sidecar-container-5fb59f558b-wnmgk   2/2     Running   0          94s</code></pre><p>公开 Deployment（<code>kubectl</code> 工具会为你创建一个 ）：</p><pre class="shell"><code>kubectl expose deployment configmap-sidecar-container --name=configmap-sidecar-service --port=8081 --target-port=80</code></pre><p>使用 <code>kubectl</code> 转发端口：</p><pre class="shell"><code># 此命令将在后台运行
+kubectl port-forward service/configmap-sidecar-service 8081:8081 &amp;</code></pre><p>访问服务：</p><pre class="shell"><code>curl http://localhost:8081</code></pre><p>你应该看到类似以下的输出：</p><pre><code>Sat Feb 17 13:09:05 UTC 2024 My preferred color is blue</code></pre><p>编辑 ConfigMap：</p><pre class="shell"><code>kubectl edit configmap color</code></pre><p>在出现的编辑器中，将键 <code>color</code> 的值从 <code>blue</code> 变更为 <code>green</code>。 保存你的变更。kubectl 工具会相应地更新 ConfigMap（如果报错，请重试）。</p><p>以下是你编辑后该清单可能的样子：</p><div class="sourceCode" id="cb51"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb51-1"><a href="#cb51-1" aria-hidden="true" tabindex="-1"></a><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb51-2"><a href="#cb51-2" aria-hidden="true" tabindex="-1"></a><span class="fu">data</span><span class="kw">:</span></span>
+<span id="cb51-3"><a href="#cb51-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">color</span><span class="kw">:</span><span class="at"> green</span></span>
+<span id="cb51-4"><a href="#cb51-4" aria-hidden="true" tabindex="-1"></a><span class="fu">kind</span><span class="kw">:</span><span class="at"> ConfigMap</span></span>
+<span id="cb51-5"><a href="#cb51-5" aria-hidden="true" tabindex="-1"></a><span class="co"># 你可以保留现有的 metadata 不变。</span></span>
+<span id="cb51-6"><a href="#cb51-6" aria-hidden="true" tabindex="-1"></a><span class="co"># 你将看到的值与本例的值不会完全一样。</span></span>
+<span id="cb51-7"><a href="#cb51-7" aria-hidden="true" tabindex="-1"></a><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb51-8"><a href="#cb51-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">creationTimestamp</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2024-02-17T12:20:30Z&quot;</span></span>
+<span id="cb51-9"><a href="#cb51-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> color</span></span>
+<span id="cb51-10"><a href="#cb51-10" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">namespace</span><span class="kw">:</span><span class="at"> default</span></span>
+<span id="cb51-11"><a href="#cb51-11" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resourceVersion</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;1054&quot;</span></span>
+<span id="cb51-12"><a href="#cb51-12" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">uid</span><span class="kw">:</span><span class="at"> e40bb34c-58df-4280-8bea-6ed16edccfaa</span></span></code></pre></div><p>循环访问服务 URL 几秒钟。</p><pre class="shell"><code># 当你满意时可以取消此操作 (Ctrl-C)
+while true; do curl --connect-timeout 7.5 http://localhost:8081; sleep 10; done</code></pre><p>你应该会看到如下的输出变化：</p><pre><code>Sat Feb 17 13:12:35 UTC 2024 My preferred color is blue
+Sat Feb 17 13:12:45 UTC 2024 My preferred color is blue
+Sat Feb 17 13:12:55 UTC 2024 My preferred color is blue
+Sat Feb 17 13:13:05 UTC 2024 My preferred color is blue
+Sat Feb 17 13:13:15 UTC 2024 My preferred color is green
+Sat Feb 17 13:13:25 UTC 2024 My preferred color is green
+Sat Feb 17 13:13:35 UTC 2024 My preferred color is green</code></pre><h2 id="通过作为卷挂载的不可变-configmap-更新配置-rollout-configmap-immutable-volume">通过作为卷挂载的不可变 ConfigMap 更新配置 {#rollout-configmap-immutable-volume}</h2><p>不可变 ConfigMap 专门用于恒定且预期<strong>不会</strong>随时间变化的配置。 将 ConfigMap 标记为不可变可以提高性能，因为 kubelet 不会监视变更。</p><p>如果你确实需要进行变更，你应计划：</p><ul><li>变更 ConfigMap 的名称，并转而运行引用新名称的 Pod</li><li>替换集群中之前运行使用旧值的 Pod 的所有节点</li><li>在任何之前加载过旧 ConfigMap 的节点上重新启动 kubelet</li></ul><p>以下是一个不可变 ConfigMap的示例清单。</p><p>创建不可变 ConfigMap：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/configmap/immutable-configmap.yaml</code></pre><p>下面是一个 Deployment 清单示例，其中不可变 ConfigMap <code>company-name-20150801</code> 作为挂载到 Pod 的唯一容器中。</p><p>创建此 Deployment：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/deployments/deployment-with-immutable-configmap-as-volume.yaml</code></pre><p>检查此 Deployment 的 Pod 以确保它们已就绪（通过进行匹配）：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=immutable-configmap-volume</code></pre><p>你应该看到类似以下的输出：</p><pre><code>NAME                                          READY   STATUS    RESTARTS   AGE
+immutable-configmap-volume-78b6fbff95-5gsfh   1/1     Running   0          62s
+immutable-configmap-volume-78b6fbff95-7vcj4   1/1     Running   0          62s
+immutable-configmap-volume-78b6fbff95-vdslm   1/1     Running   0          62s</code></pre><p>Pod 的容器引用 ConfigMap 中所定义的数据，并使用它将报告打印到标准输出。 你可以通过查看 Deployment 中某个 Pod 的日志来检查此报告：</p><pre class="shell"><code># 选择属于该 Deployment 的一个 Pod，并查看其日志
+kubectl logs deployments/immutable-configmap-volume</code></pre><p>你应该会看到类似以下的输出：</p><pre><code>Found 3 pods, using pod/immutable-configmap-volume-78b6fbff95-5gsfh
+Wed Mar 20 03:52:34 UTC 2024 The name of the company is ACME, Inc.
+Wed Mar 20 03:52:44 UTC 2024 The name of the company is ACME, Inc.
+Wed Mar 20 03:52:54 UTC 2024 The name of the company is ACME, Inc.</code></pre><p>一旦 ConfigMap 被标记为不可变，就无法撤销此变更，也无法修改 <code>data</code> 或 <code>binaryData</code> 字段的内容。 为了修改使用此配置的 Pod 的行为，你需要创建一个新的不可变 ConfigMap，并编辑 Deployment 以定义一个稍有不同的 Pod 模板，引用新的 ConfigMap。</p><p>通过使用下面所示的清单创建一个新的不可变 ConfigMap：</p><pre class="shell"><code>kubectl apply -f https://k8s.io/examples/configmap/new-immutable-configmap.yaml</code></pre><p>你应该看到类似以下的输出：</p><pre><code>configmap/company-name-20240312 created</code></pre><p>检查新建的 ConfigMap：</p><pre class="shell"><code>kubectl get configmap</code></pre><p>你应该看到输出会同时显示新旧 ConfigMap：</p><pre><code>NAME                    DATA   AGE
+company-name-20150801   1      22m
+company-name-20240312   1      24s</code></pre><p>修改 Deployment 以引用新的 ConfigMap。</p><p>编辑 Deployment：</p><pre class="shell"><code>kubectl edit deployment immutable-configmap-volume</code></pre><p>在出现的编辑器中，更新现有的卷定义以使用新的 ConfigMap。</p><div class="sourceCode" id="cb65"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb65-1"><a href="#cb65-1" aria-hidden="true" tabindex="-1"></a><span class="fu">volumes</span><span class="kw">:</span></span>
+<span id="cb65-2"><a href="#cb65-2" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">configMap</span><span class="kw">:</span></span>
+<span id="cb65-3"><a href="#cb65-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">defaultMode</span><span class="kw">:</span><span class="at"> </span><span class="dv">420</span></span>
+<span id="cb65-4"><a href="#cb65-4" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> company-name-20240312</span><span class="co"> # 更新此字段</span></span>
+<span id="cb65-5"><a href="#cb65-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">name</span><span class="kw">:</span><span class="at"> config-volume</span></span></code></pre></div><p>你应该看到以下输出：</p><pre><code>deployment.apps/immutable-configmap-volume edited</code></pre><p>这将触发一次上线操作。等待所有先前的 Pod 终止并且新的 Pod 处于就绪状态。</p><p>监控 Pod 的状态：</p><pre class="shell"><code>kubectl get pods --selector=app.kubernetes.io/name=immutable-configmap-volume</code></pre><pre><code>NAME                                          READY   STATUS        RESTARTS   AGE
+immutable-configmap-volume-5fdb88fcc8-29v8n   1/1     Running       0          13s
+immutable-configmap-volume-5fdb88fcc8-52ddd   1/1     Running       0          14s
+immutable-configmap-volume-5fdb88fcc8-n5jx4   1/1     Running       0          15s
+immutable-configmap-volume-78b6fbff95-5gsfh   1/1     Terminating   0          32m
+immutable-configmap-volume-78b6fbff95-7vcj4   1/1     Terminating   0          32m
+immutable-configmap-volume-78b6fbff95-vdslm   1/1     Terminating   0          32m</code></pre><p>最终，你应该会看到类似以下的输出：</p><pre><code>NAME                                          READY   STATUS    RESTARTS   AGE
+immutable-configmap-volume-5fdb88fcc8-29v8n   1/1     Running   0          43s
+immutable-configmap-volume-5fdb88fcc8-52ddd   1/1     Running   0          44s
+immutable-configmap-volume-5fdb88fcc8-n5jx4   1/1     Running   0          45s</code></pre><p>查看此 Deployment 中某个 Pod 的日志：</p><pre class="shell"><code># 选择属于此 Deployment 的一个 Pod，并查看其日志
+kubectl logs deployment/immutable-configmap-volume</code></pre><p>你应该会看到类似下面的输出：</p><pre><code>Found 3 pods, using pod/immutable-configmap-volume-5fdb88fcc8-n5jx4
+Wed Mar 20 04:24:17 UTC 2024 The name of the company is Fiktivesunternehmen GmbH
+Wed Mar 20 04:24:27 UTC 2024 The name of the company is Fiktivesunternehmen GmbH
+Wed Mar 20 04:24:37 UTC 2024 The name of the company is Fiktivesunternehmen GmbH</code></pre><p>建议一旦所有 Deployment 都迁移到使用新的不可变 ConfigMap，删除旧的 ConfigMap。</p><pre class="shell"><code>kubectl delete configmap company-name-20150801</code></pre><h2 id="总结-summary">总结 {#summary}</h2><p>在 Pod 上作为卷挂载的 ConfigMap 所发生的变更将在后续的 kubelet 同步后无缝生效。</p><p>配置为 Pod 环境变量的 ConfigMap 所发生变更将在后续的 Pod 上线操作后生效。</p><p>一旦 ConfigMap 被标记为不可变，就无法撤销此变更（你不能将不可变的 ConfigMap 改为可变）， 并且你也不能对 <code>data</code> 或 <code>binaryData</code> 字段的内容进行任何变更。你可以删除并重新创建 ConfigMap， 或者你可以创建一个新的不同的 ConfigMap。当你删除 ConfigMap 时， 运行中的容器及其 Pod 将保持对引用了现有 ConfigMap 的任何卷的挂载点。</p><h2 id="-2"></h2><p>终止正在运行的 <code>kubectl port-forward</code> 命令。</p><p>删除以上教程中所创建的资源：</p><pre class="shell"><code>kubectl delete deployment configmap-volume configmap-env-var configmap-two-containers configmap-sidecar-container immutable-configmap-volume
+kubectl delete service configmap-service configmap-sidecar-service
+kubectl delete configmap sport fruits color company-name-20240312
+
+kubectl delete configmap company-name-20150801 # 如果在任务执行期间未被处理</code></pre>
+</body>
+</html>

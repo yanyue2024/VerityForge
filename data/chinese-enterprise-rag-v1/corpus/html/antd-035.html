@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>虚拟表格来了！</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">虚拟表格来了！</h1>
+</header>
+<h1 id="虚拟表格来了">虚拟表格来了！</h1><h2 id="前言">前言</h2><p>在 v4 时期，我们为 Table 添加了一个自定义 <code>components</code> 的示例，通过 <code>components.body</code> 替换默认的 ``，实现虚拟滚动的效果。但是很多开发者反馈 Demo 中的虚拟表格有很多功能无法实现。例如 固定列、合并行列、展开行 等等。</p><p>所以在 v5 中，我们提出了 RFC StaticTable for fast perf &amp; virtual scroll support。该 RFC 期望提供一个高性能的 Table.StaticTable，它会默认支持虚拟滚动。但是随着开发进行，我们最终决定 StaticTable 在底层 <code>@rc-component/table</code> 上实现，而在 antd 侧则只需要通过 `` 即可开启。</p><h2 id="太长不看">太长不看</h2><p>Table 通过 <code>virtual</code> 属性即可开启虚拟滚动能力。同时，原 Table 的功能都能正常使用：</p><pre class="tsx"><code></code></pre><h3 id="固定列">固定列</h3><p>图片说明：Fixed Columns</p><h3 id="可展开">可展开</h3><p>图片说明：Expandable</p><h3 id="行列组合">行列组合</h3><p>图片说明：Rowspan &amp; Colspan</p><p>你可以直接访问 虚拟列表 示例进行体验。</p><h2 id="一些细节">一些细节</h2><p>antd 的 Table 底层使用了 <code>@rc-component/table</code> 组件，我们的虚拟滚动功能也是复用了上文提到的 <code>components</code> 属性。将中间的 `` 替换为 <code>@rc-component/virtual-list</code>，该组件广泛应用于 antd 的各个虚拟滚动场景中。例如 Select、Tree 都可以见到它的身影。而 <code>@rc-component/virtual-list</code> 本身并不支持横向滚动能力，因而我们在这次改造中，也为其添加了横向滚动的支持。</p><h3 id="固定列-1">固定列</h3><p>在 v4 时期，我们便将 Table 的固定列改造成了 <code>position: sticky</code> 实现。该 CSS 允许你在滚动时，将元素固定在某个位置。从而避免 v3 时期需要额外渲染一份 Table 用于实现固定位置的效果：</p><p>对于叠加固定，只需要配置不同的偏移量即可：</p><p>在虚拟滚动中，我们同样可以利用该特性。直接复用 <code>sticky</code> 样式，即可实现固定列的效果。而 <code>@rc-component/virtual-list</code> 需要付出的仅仅是提供横向滚动，而不需要关心固定列的实现。</p><h3 id="可展开-1">可展开</h3><p>在 <code>@rc-component/table</code> 中，我们会将 <code>dataSource</code> 通过 <code>useFlattenRecords</code> 将树状结构打平，从而支持开发者自定义的虚拟滚动能力。感谢 @crawler-django 当年的贡献，因而我们这次并不需要再实现一次打平逻辑。</p><p>但是在测试时，我们发现一个奇怪的现象。表格在首次、再次渲染时，会有非常大的卡顿。在进行断点时，它来自于 <code>useFlattenRecords</code> hooks。而测试的代码本身并没有使用可展开树的功能，于是我们对其进行了排查。发现在 <code>useFlattenRecords</code> 中，存在大量的 GC 操作。而这些操作是由于一段不起眼的代码引起的：</p><pre class="tsx"><code>// Fake code. Not used in real world
+function flatten(data: T[] = []) {
+  let tmpList: T[] = [];
+
+  for (let i = 0; i
+
+为了渲染该项内容，我们就需要计算出当前屏幕区域内的所有 Record 相关的 `rowSpan` 和 `colSpan`。而这个计算过程是非常复杂的，我们需要遍历所有的 Record，计算出每个 Record 的 `rowSpan` 和 `colSpan`。显然这是一个非常耗时的操作，而且当 `rowSpan` 数据距离可见区域过远时，它需要额外渲染的内容量也会非常大：
+
+对于 `rowSpan`，你可能会想到我们是否可以提前把 `rowSpan` 计算好，然后在滚动时获取这些数据。这其实是不行的，行列数据由 `onCell` 提供，而在父节点渲染时都全部计算一次 `onCell` 会产生巨量的性能损耗：
+
+```jsx
+const Demo = () =&gt; {
+  const [spanCount, setSpanCount] = useState(3);
+
+  const columns = [
+    {
+      dataIndex: &#39;group&#39;,
+      onCell: (_, index) =&gt; ({
+        rowSpan: index % spanCount === 0 ? spanCount : 0,
+      }),
+    },
+  ];
+
+  // WOW!
+  React.useEffect(() =&gt; {
+    setSpanCount(5);
+  }, []);
+
+  return ;
+};</code></pre><p>此外，即便我们统计了 <code>rowSpan</code> 的数据，并且将屏幕外的行也进行渲染仍然不够。它可能会出现 <code>rowSpan</code> 交替的情况：</p><p>假设出现最糟的情况，所有的行都和其他的行有 <code>rowSpan</code>，那么我们需要渲染的内容量将会是整个 <code>dataSource</code>。即虚拟滚动不再虚拟。因而，我们需要对其进行裁剪，只渲染可见区域内的 <code>rowSpan</code>，而将屏幕外的无关部分去除：</p><p>所以，反向思考。我们只需要从可见区域出发。然后向上、向下获取被 <code>rowSpan</code> 影响到的 Record。然后仅对提供 <code>rowSpan</code> 的 <code>cell</code> 进行渲染即可：</p><p><code>@rc-component/virtual-list</code> 提供了 <code>extraRender</code> 方法，它会提供当前虚拟滚动中所渲染的行号。我们只需要对这个范围内的 Record 执行一次 <code>onCell</code> 获取每个 <code>cell</code> 的 <code>rowSpan</code> 和 <code>colSpan</code> 信息。既可以知道当前行是否存在对外的 <code>rowSpan</code> 依赖：</p><pre class="tsx"><code>// Fake code. Not used in real world
+const extraRender = ({ start, end }) =&gt; {
+  // Start record
+  const startRecord = flattenData[start];
+  columns.forEach((col) =&gt; {
+    // `rowSpan` === 0 means upper record has `rowSpan`
+    const { rowSpan } = col.onCell(startRecord, start);
+  });
+
+  // End record
+  const endRecord = flattenData[end];
+  columns.forEach((col) =&gt; {
+    // `rowSpan` &gt; 1 means it should extend to next records
+    const { rowSpan } = col.onCell(endRecord, end);
+  });
+};</code></pre><p>需要注意的是，在实际收集过程中，我们会将整个范围有 <code>rowSpan</code> 的 <code>cell</code> 都记录下来而不仅仅是头尾的 Record。然后通过 <code>extraRender</code> 方法将这些 <code>cell</code> 渲染出来（而原本的 Record 对于被 <code>rowSpan</code> 影响到的 <code>cell</code> 则跳过渲染）。这样就可以保证 <code>rowSpan</code> 的正确性了。</p><p>当然，这种实现是基于 <code>rowSpan &gt; 1</code> 和 <code>rowSpan = 0</code> 会匹配出现的假设。它不支持 <code>rowSpan</code> 用于挤压至下层的情况，但是对于数据表格而言，这已经足够了。</p><h2 id="总结">总结</h2><p>虚拟滚动是一个非常复杂的功能，它需要考虑的因素非常多。但是我们相信花费这些精力是值得的，开发者不用再在功能和性能之间做取舍，而是可以同时拥有两者。</p><p>以上。</p>
+</body>
+</html>

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BLUEPRINT="${ROOT_DIR}/benchmarks/yanyue-operations-v1.blueprint.json"
+BLUEPRINT="${ROOT_DIR}/benchmarks/chinese-enterprise-rag-v1.blueprint.json"
 OUTPUT=""
 DRY_RUN=false
 ALLOW_DUPLICATE=false
@@ -59,7 +59,7 @@ token=$(curl -fsS -H 'Content-Type: application/json' --data "${login_payload}" 
 auth=(-H "Authorization: Bearer ${token}")
 
 knowledge_base_name=$(jq -er '.knowledgeBase.name' "${BLUEPRINT}")
-benchmark_id=$(jq -er '.benchmarkId // "yanyue-operations-v1"' "${BLUEPRINT}")
+benchmark_id=$(jq -er '.benchmarkId // "chinese-enterprise-rag-v1"' "${BLUEPRINT}")
 knowledge_bases=$(curl -fsS "${auth[@]}" "${API_URL}/api/v1/knowledge-bases")
 knowledge_base_matches=$(jq -c --arg name "${knowledge_base_name}" \
   '[.[] | select(.name == $name)]' <<<"${knowledge_bases}")

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
-    "smoke:production": "node tests/production-smoke.mjs"
+    "smoke:production": "node tests/production-smoke.mjs",
+    "showcase:capture": "node tests/capture-showcase.mjs"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",

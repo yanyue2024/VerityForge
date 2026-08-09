@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Kubernetes API 概念</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">Kubernetes API 概念</h1>
+</header>
+<h1 id="kubernetes-api-概念">Kubernetes API 概念</h1><p>Kubernetes API 是通过 HTTP 提供的基于资源 (RESTful) 的编程接口。 它支持通过标准 HTTP 动词（POST、PUT、PATCH、DELETE、GET）检索、创建、更新和删除主要资源。</p><p>对于某些资源，API 包括额外的子资源，允许细粒度授权（例如：将 Pod 的详细信息与检索日志分开）， 为了方便或者提高效率，可以以不同的表示形式接受和服务这些资源。</p><p>Kubernetes 支持通过 <strong>watch</strong> 实现高效的资源变更通知：</p><p>Kubernetes 还提供一致的列表操作，以便 API 客户端可以有效地缓存、跟踪和同步资源的状态。</p><p>你可以在线查看 API 参考， 或继续阅读以了解 API 的一般信息。</p><h2 id="kubernetes-api-术语-standard-api-terminology">Kubernetes API 术语 {#standard-api-terminology}</h2><p>Kubernetes 通常使用常见的 RESTful 术语来描述 API 概念：</p><ul><li><strong>资源类型（Resource Type）</strong> 是 URL 中使用的名称（<code>pods</code>、<code>namespaces</code>、<code>services</code>）</li><li>所有资源类型都有一个具体的表示（它们的对象模式），称为 <strong>类别（Kind）</strong></li><li>资源类型的实例的列表称为 <strong>集合（Collection）</strong></li><li>资源类型的单个实例称为 <strong>资源（Resource）</strong>，通常也表示一个 <strong>对象（Object）</strong></li><li>对于某些资源类型，API 包含一个或多个 <strong>子资源（sub-resources）</strong>，这些子资源表示为资源下的 URI 路径</li></ul><p>大多数 Kubernetes API 资源类型都是对象： 它们代表集群上某个概念的具体实例，例如 Pod 或名字空间。 少数 API 资源类型是“虚拟的”，它们通常代表的是操作而非对象本身， 例如权限检查（使用带有 JSON 编码的 <code>SubjectAccessReview</code> 主体的 POST 到 <code>subjectaccessreviews</code> 资源）， 或 Pod 的子资源 <code>eviction</code>（用于触发 API 发起的驱逐）。</p><h3 id="对象名字-object-names">对象名字 {#object-names}</h3><p>你可以通过 API 创建的所有对象都有一个唯一的， 以允许幂等创建和检索，但如果虚拟资源类型不可检索或不依赖幂等性，则它们可能没有唯一名称。 在内， 同一时刻只能有一个给定类别的对象具有给定名称。 但是，如果你删除该对象，你可以创建一个具有相同名称的新对象。 有些对象没有名字空间（例如：节点），因此它们的名称在整个集群中必须是唯一的。</p><h3 id="api-动词-api-verbs">API 动词 {#api-verbs}</h3><p>几乎所有对象资源类型都支持标准 HTTP 动词 - GET、POST、PUT、PATCH 和 DELETE。 Kubernetes 也使用自己的动词，这些动词通常写成小写，以区别于 HTTP 动词。</p><p>Kubernetes 使用术语 <strong>list</strong> 来描述返回资源集合的操作， 以区别于检索单个资源、通常名为 <strong>get</strong> 的操作。 如果你发送带有 <code>?watch</code> 查询参数的 HTTP GET 请求， Kubernetes 将其称为 <strong>watch</strong> 而不是 <strong>get</strong>（有关详细信息，请参阅快速检测更改）。</p><p>对于 PUT 请求，Kubernetes 在内部根据现有对象的状态将它们分类为 <strong>create</strong> 或 <strong>update</strong>。 <strong>update</strong> 不同于 <strong>patch</strong>；<strong>patch</strong> 的 HTTP 动词是 PATCH。</p><h2 id="资源-uri-resource-uris">资源 URI {#resource-uris}</h2><p>所有资源类型要么是集群作用域的（<code>/apis/GROUP/VERSION/*</code>）， 要么是名字空间作用域的（<code>/apis/GROUP/VERSION/namespaces/NAMESPACE/*</code>）。 名字空间作用域的资源类型会在其名字空间被删除时也被删除， 并且对该资源类型的访问是由定义在名字空间域中的授权检查来控制的。</p><p>注意：核心资源使用 <code>/api</code> 而不是 <code>/apis</code>，并且不包含 GROUP 路径段。</p><p>例如：</p><ul><li><code>/api/v1/namespaces</code></li><li><code>/api/v1/pods</code></li><li><code>/api/v1/namespaces/my-namespace/pods</code></li><li><code>/apis/apps/v1/deployments</code></li><li><code>/apis/apps/v1/namespaces/my-namespace/deployments</code></li><li><code>/apis/apps/v1/namespaces/my-namespace/deployments/my-deployment</code></li></ul><p>你还可以访问资源集合（例如：列出所有 Node）。以下路径用于检索集合和资源：</p><ul><li><p>集群作用域的资源：</p><ul><li><code>GET /apis/GROUP/VERSION/RESOURCETYPE</code> - 返回指定资源类型的资源的集合</li><li><code>GET /apis/GROUP/VERSION/RESOURCETYPE/NAME</code> - 返回指定资源类型下名称为 NAME 的资源</li></ul></li><li><p>名字空间作用域的资源：</p><ul><li><code>GET /apis/GROUP/VERSION/RESOURCETYPE</code> - 返回所有名字空间中指定资源类型的全部实例的集合</li><li><code>GET /apis/GROUP/VERSION/namespaces/NAMESPACE/RESOURCETYPE</code> - 返回名字空间 NAMESPACE 内给定资源类型的全部实例的集合</li><li><code>GET /apis/GROUP/VERSION/namespaces/NAMESPACE/RESOURCETYPE/NAME</code> - 返回名字空间 NAMESPACE 中给定资源类型的名称为 NAME 的实例</li></ul></li></ul><p>由于名字空间本身是一个集群作用域的资源类型，你可以通过 <code>GET /api/v1/namespaces/</code> 检视所有名字空间的列表（“集合”），使用 <code>GET /api/v1/namespaces/NAME</code> 查看特定名字空间的详细信息。</p><ul><li>集群作用域的子资源：<code>GET /apis/GROUP/VERSION/RESOURCETYPE/NAME/SUBRESOURCE</code></li><li>名字空间作用域的子资源：<code>GET /apis/GROUP/VERSION/namespaces/NAMESPACE/RESOURCETYPE/NAME/SUBRESOURCE</code></li></ul><p>取决于对象是什么，每个子资源所支持的动词有所不同 - 参见 API 文档以了解更多信息。 跨多个资源来访问其子资源是不可能的 - 如果需要这一能力，则通常意味着需要一种新的虚拟资源类型了。</p><h2 id="http-媒体类型-alternate-representations-of-resources">HTTP 媒体类型 {#alternate-representations-of-resources}</h2><p>通过 HTTP，Kubernetes 支持 JSON 和 Protobuf 网络编码格式。</p><p>默认情况下，Kubernetes 使用 <code>application/json</code> 媒体类型以 JSON 序列化返回对象。 虽然 JSON 是默认类型，但客户端可以用 YAML 请求响应，或使用更高效的二进制 Protobuf 表示，以便在大规模环境中获得更好的性能。</p><p>Kubernetes API 实现了标准的 HTTP 内容类型协商： 使用 <code>GET</code> 调用传递 <code>Accept</code> 头时将请求服务器尝试以你首选的媒体类型返回响应。 如果你想通过 <code>PUT</code> 或 <code>POST</code> 请求将对象以 Protobuf 发送到服务器，则必须相应地设置 <code>Content-Type</code> 请求头。</p><p>如果你请求了可用的媒体类型，API 服务器会以合适的 <code>Content-Type</code> 返回响应； 如果你请求的媒体类型都不被支持，API 服务器会返回 <code>406 Not acceptable</code> 错误消息。 所有内置资源类型都支持 <code>application/json</code> 媒体类型。</p><h3 id="json-资源编码-json-encoding">JSON 资源编码 {#json-encoding}</h3><p>Kubernetes API 默认使用 JSON 来编码 HTTP 消息体。</p><p>例如：</p><ol type="1"><li><p>在不指定首选格式的情况下，列举集群中的所有 Pod：</p><pre class="http"><code>GET /api/v1/pods</code></pre><pre><code>200 OK
+Content-Type: application/json
+
+… JSON 编码的 Pod 集合（PodList 对象）</code></pre></li><li><p>通过向服务器发送 JSON 并请求 JSON 响应来创建 Pod。</p><pre class="http"><code>POST /api/v1/namespaces/test/pods
+Content-Type: application/json
+Accept: application/json
+… JSON 编码的 Pod 对象</code></pre><pre><code>200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;Pod&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  …
+}</code></pre></li></ol><h3 id="yaml-资源编码-yaml-encoding">YAML 资源编码 {#yaml-encoding}</h3><p>Kubernetes 还支持 <code>application/yaml</code> 媒体类型用于请求和响应。<code>YAML</code> 可用于定义 Kubernetes 清单和 API 交互。</p><p>例如：</p><ol type="1"><li><p>以 YAML 格式列举集群上的所有 Pod：</p><pre class="http"><code>GET /api/v1/pods
+Accept: application/yaml</code></pre><pre><code>200 OK
+Content-Type: application/yaml
+
+… YAML 编码的 Pod 集合（PodList 对象）</code></pre></li><li><p>通过向服务器发送 YAML 编码的数据并请求 YAML 响应来创建 Pod：</p><pre class="http"><code>POST /api/v1/namespaces/test/pods
+Content-Type: application/yaml
+Accept: application/yaml
+… YAML 编码的 Pod 对象</code></pre><pre><code>200 OK
+Content-Type: application/yaml
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+  …</code></pre></li></ol><h3 id="kubernetes-protobuf-编码-protobuf-encoding">Kubernetes Protobuf 编码 {#protobuf-encoding}</h3><p>Kubernetes 使用封套形式来对 Protobuf 响应进行编码。 封套外层由 4 个字节的特殊数字开头，便于从磁盘文件或 etcd 中辩识 Protobuf 格式的（而不是 JSON）数据。这个 4 字节的特殊数字后跟一个 Protobuf 编码的封套消息， 此消息描述了下层对象的编码和类型。在 Protobuf 封套消息中，内部对象数据使用 Unknown 的 <code>raw</code> 字段进行记录（有关细节参见 IDL）。</p><p>例如：</p><ol type="1"><li><p>以 Protobuf 格式列举集群中的所有 Pod。</p><pre class="http"><code>GET /api/v1/pods
+Accept: application/vnd.kubernetes.protobuf</code></pre><pre><code>200 OK
+Content-Type: application/vnd.kubernetes.protobuf
+
+… 二进制编码的 Pod 集合（PodList 对象）</code></pre></li><li><p>通过向服务器发送 Protobuf 编码的数据创建 Pod，但请求以 JSON 形式接收响应：</p><pre class="http"><code>POST /api/v1/namespaces/test/pods
+Content-Type: application/vnd.kubernetes.protobuf
+Accept: application/json
+… 二进制编码的 Pod 对象</code></pre><pre><code>200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;Pod&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  ...
+}</code></pre></li></ol><p>你可以将这两种技术结合使用，利用 Kubernetes 的 Protobuf 编码与所有支持的 API 进行读写交互。 只有某些 API 资源类型与 Protobuf 兼容。</p><p>封套格式如下：</p><pre><code>四个字节的特殊数字前缀：
+  字节 0-3: &quot;k8s\x00&quot; [0x6b, 0x38, 0x73, 0x00]
+
+使用下面 IDL 来编码的 Protobuf 消息：
+  message Unknown {
+    // typeMeta 应该包含 &quot;kind&quot; 和 &quot;apiVersion&quot; 的字符串值，就像
+    // 对应的 JSON 对象中所设置的那样
+    optional TypeMeta typeMeta = 1;
+
+    // raw 中将保存用 protobuf 序列化的完整对象。
+    // 参阅客户端库中为指定 kind 所作的 protobuf 定义
+    optional bytes raw = 2;
+
+    // contentEncoding 用于 raw 数据的编码格式。未设置此值意味着没有特殊编码。
+    optional string contentEncoding = 3;
+
+    // contentType 包含 raw 数据所采用的序列化方法。
+    // 未设置此值意味着 application/vnd.kubernetes.protobuf，且通常被忽略
+    optional string contentType = 4;
+  }
+
+  message TypeMeta {
+    // apiVersion 是 type 对应的组名/版本
+    optional string apiVersion = 1;
+    // kind 是对象模式定义的名称。此对象应该存在一个 protobuf 定义。
+    optional string kind = 2;
+  }</code></pre><p>收到 <code>application/vnd.kubernetes.protobuf</code> 格式响应的客户端在响应与预期的前缀不匹配时应该拒绝响应， 因为将来的版本可能需要以某种不兼容的方式更改序列化格式，并且这种更改是通过变更前缀完成的。</p><h4 id="与-kubernetes-protobuf-的兼容性-protobuf-encoding-compatibility">与 Kubernetes Protobuf 的兼容性 {#protobuf-encoding-compatibility}</h4><p>并非所有 API 资源类型都支持 Protobuf；具体来说，Protobuf 不适用于定义为 或通过提供服务的资源。</p><p>作为客户端，如果你可能需要使用扩展类型，则应在请求 <code>Accept</code> 请求头中指定多种内容类型以支持回退到 JSON。例如：</p><pre><code>Accept: application/vnd.kubernetes.protobuf, application/json</code></pre><h3 id="cbor-资源编码-cbor-encoding">CBOR 资源编码 {#cbor-encoding}</h3><p>启用 <code>CBORServingAndStorage</code> 特性门控后， 所有内置资源类型及所有由 所定义的资源的请求体和响应体都可以被编码为 CBOR 二进制数据格式。 如果在各个聚合 API 服务器中启用了 CBOR， 则在中也支持 CBOR。</p><p>当请求体包含单个 CBOR 编码数据项时， 客户端应在 <code>Content-Type</code> HTTP 请求头中指明 IANA 媒体类型 <code>application/cbor</code>， 当准备接受响应中以 CBOR 编码的数据项时，客户端应在 <code>Accept</code> HTTP 请求头中指明 IANA 媒体类型 <code>application/cbor</code>。 API 服务器将在响应体包含以 CBOR 编码的对象时在 <code>Content-Type</code> HTTP 响应头中使用 <code>application/cbor</code>。</p><p>如果 API 服务器使用 CBOR 对 watch 请求的响应进行编码， 则响应体将是一个 CBOR 序列， 而 <code>Content-Type</code> HTTP 响应头将使用 IANA 媒体类型 <code>application/cbor-seq</code>。 此序列的每个条目（如果有的话）是一个以 CBOR 编码的 watch 事件。</p><p>除了以 YAML 编码的服务器端应用配置所用的现有 <code>application/apply-patch+yaml</code> 媒体类型之外， 启用 CBOR 的 API 服务器将接受 <code>application/apply-patch+cbor</code> 媒体类型用于以 CBOR 编码的服务器端应用配置。 对于 <code>application/json-patch+json</code>、<code>application/merge-patch+json</code> 或 <code>application/strategic-merge-patch+json</code>，没有支持的 CBOR 等效类型。</p><h2 id="高效检测变更-efficient-detection-of-changes">高效检测变更 {#efficient-detection-of-changes}</h2><p>Kubernetes API 允许客户端对对象或集合发出初始请求，然后跟踪自该初始请求以来的更改：<strong>watch</strong>。 客户端可以发送 <strong>list</strong> 或者 <strong>get</strong> 请求，然后发出后续 <strong>watch</strong> 请求。</p><p>为了使这种更改跟踪成为可能，每个 Kubernetes 对象都有一个 <code>resourceVersion</code> 字段， 表示存储在底层持久层中的该资源的版本。在检索资源集合（名字空间或集群范围）时， 来自 API 服务器的响应包含一个 <code>resourceVersion</code> 值。 客户端可以使用该 <code>resourceVersion</code> 来启动对 API 服务器的 <strong>watch</strong>。</p><p>当你发送 <strong>watch</strong> 请求时，API 服务器会响应更改流。 这些更改逐项列出了在你指定为 <strong>watch</strong> 请求参数的 <code>resourceVersion</code> 之后发生的操作 （例如 <strong>create</strong>、<strong>delete</strong> 和 <strong>update</strong>）的结果。 整个 <strong>watch</strong> 机制允许客户端获取当前状态，然后订阅后续更改，而不会丢失任何事件。</p><p>如果客户端 <strong>watch</strong> 连接断开，则该客户端可以从最后返回的 <code>resourceVersion</code> 开始新的 <strong>watch</strong> 请求； 客户端还可以执行新的 <strong>get</strong>/<strong>list</strong> 请求并重新开始。有关更多详细信息，请参阅资源版本语义。</p><p>例如：</p><ol type="1"><li><p>列举给定名字空间中的所有 Pod：</p><pre class="http"><code>GET /api/v1/namespaces/test/pods
+---
+200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;PodList&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  &quot;metadata&quot;: {&quot;resourceVersion&quot;:&quot;10245&quot;},
+  &quot;items&quot;: [...]
+}</code></pre></li><li><p>从资源版本 10245 开始，接收影响 <strong>test</strong> 名字空间中 Pod 的所有 API 操作 （例如 <strong>create</strong>、<strong>delete</strong>、<strong>patch</strong> 或 <strong>update</strong>）的通知。 每个更改通知都是一个 JSON 文档。 HTTP 响应正文（用作 <code>application/json</code>）由一系列 JSON 文档组成。</p><pre class="http"><code>GET /api/v1/namespaces/test/pods?watch=1&amp;resourceVersion=10245
+---
+200 OK
+Transfer-Encoding: chunked
+Content-Type: application/json
+
+{
+  &quot;type&quot;: &quot;ADDED&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;10596&quot;, ...}, ...}
+}
+{
+  &quot;type&quot;: &quot;MODIFIED&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;11020&quot;, ...}, ...}
+}
+...</code></pre></li></ol><p>给定的 Kubernetes 服务器只会保留一定的时间内发生的历史变更列表。 使用 etcd3 的集群默认保存过去 5 分钟内发生的变更。 当所请求的 <strong>watch</strong> 操作因为资源的历史版本不存在而失败， 客户端必须能够处理因此而返回的状态代码 <code>410 Gone</code>，清空其本地的缓存， 重新执行 <strong>get</strong> 或者 <strong>list</strong> 操作， 并基于新返回的 <code>resourceVersion</code> 来开始新的 <strong>watch</strong> 操作。</p><p>对于订阅集合，Kubernetes 客户端库通常会为 <strong>list</strong> - 然后 - <strong>watch</strong> 的逻辑提供某种形式的标准工具。 （在 Go 客户端库中，这称为 <code>反射器（Reflector）</code>，位于 <code>k8s.io/client-go/tools/cache</code> 包中。）</p><h3 id="监视书签-watch-bookmark">监视书签 {#Watch-bookmark}</h3><p>为了减轻短历史窗口的影响，Kubernetes API 提供了一个名为 <code>BOOKMARK</code> 的监视事件。 这是一种特殊的事件，用于标记客户端请求的给定 <code>resourceVersion</code> 的所有更改都已发送。 代表 <code>BOOKMARK</code> 事件的文档属于请求所请求的类型，但仅包含一个 <code>.metadata.resourceVersion</code> 字段。例如：</p><pre class="http"><code>GET /api/v1/namespaces/test/pods?watch=1&amp;resourceVersion=10245&amp;allowWatchBookmarks=true
+---
+200 OK
+Transfer-Encoding: chunked
+Content-Type: application/json
+
+{
+  &quot;type&quot;: &quot;ADDED&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;10596&quot;, ...}, ...}
+}
+...
+{
+  &quot;type&quot;: &quot;BOOKMARK&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;12746&quot;} }
+}</code></pre><p>作为客户端，你可以在 <strong>watch</strong> 请求中设置 <code>allowWatchBookmarks=true</code> 查询参数来请求 <code>BOOKMARK</code> 事件， 但你不应假设书签会在任何特定时间间隔返回，即使要求时，客户端也不能假设 API 服务器会发送任何 <code>BOOKMARK</code> 事件。</p><h2 id="流式列表-streaming-lists">流式列表 {#streaming-lists}</h2><p>在大型集群检索某些资源类型的集合可能会导致控制平面的资源使用量（主要是 RAM）显著增加。 为了减轻其影响并简化 <strong>list</strong> + <strong>watch</strong> 模式的用户体验， Kubernetes v1.32 将在 <strong>watch</strong> 请求中请求初始状态（之前在 <strong>list</strong> 请求中请求）的特性进阶至 Beta。</p><p>在客户端，可以通过在 <strong>watch</strong> 请求中指定 <code>sendInitialEvents=true</code> 作为查询字符串参数来请求初始状态。 如果指定了这个参数，API 服务器将使用合成的初始事件（类型为 <code>ADDED</code>）来启动监视流， 以构建所有现有对象的完整状态；如果请求还带有 <code>allowWatchBookmarks=true</code> 选项， 则继续发送 <code>BOOKMARK</code> 事件。 BOOKMARK 事件包括已被同步的资源版本。 发送 BOOKMARK 事件后，API 服务器会像处理所有其他 <strong>watch</strong> 请求一样继续执行。</p><p>当你在查询字符串中设置 <code>sendInitialEvents=true</code> 时， Kubernetes 还要求你将 <code>resourceVersionMatch</code> 的值设置为 <code>NotOlderThan</code>。 如果你在查询字符串中提供 <code>resourceVersion</code> 而没有提供值或者根本没有提供这个参数， 这一请求将被视为 <strong>一致性读（Consistent Read）</strong> 请求； 当状态至少被同步到开始处理一致性读操作时，才会发送 BOOKMARK 事件。 如果你（在查询字符串中）指定了 <code>resourceVersion</code>，则只要需要等状态同步到所给资源版本时， BOOKMARK 事件才会被发送。</p><h3 id="示例-example-streaming-lists">示例 {#example-streaming-lists}</h3><p>举个例子：你想监视一组 Pod。对于该集合，当前资源版本为 10245，并且有两个 Pod：<code>foo</code> 和 <code>bar</code>。 接下来你发送了以下请求（通过使用 <code>resourceVersion=</code> 设置空的资源版本来明确请求<strong>一致性读</strong>）， 这样做的结果是可能收到如下事件序列：</p><pre class="http"><code>GET /api/v1/namespaces/test/pods?watch=1&amp;sendInitialEvents=true&amp;allowWatchBookmarks=true&amp;resourceVersion=&amp;resourceVersionMatch=NotOlderThan
+---
+200 OK
+Transfer-Encoding: chunked
+Content-Type: application/json
+
+{
+  &quot;type&quot;: &quot;ADDED&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;8467&quot;, &quot;name&quot;: &quot;foo&quot;}, ...}
+}
+{
+  &quot;type&quot;: &quot;ADDED&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;5726&quot;, &quot;name&quot;: &quot;bar&quot;}, ...}
+}
+{
+  &quot;type&quot;: &quot;BOOKMARK&quot;,
+  &quot;object&quot;: {&quot;kind&quot;: &quot;Pod&quot;, &quot;apiVersion&quot;: &quot;v1&quot;, &quot;metadata&quot;: {&quot;resourceVersion&quot;: &quot;10245&quot;} }
+}
+...
+</code></pre><h2 id="响应压缩-response-compression">响应压缩 {#response-compression}</h2><p><code>APIResponseCompression</code> 是一个选项，允许 API 服务器压缩 <strong>get</strong> 和 <strong>list</strong> 请求的响应， 减少占用的网络带宽并提高大规模集群的性能。此选项自 Kubernetes 1.16 以来默认启用， 可以通过在 API 服务器上的 <code>--feature-gates</code> 标志中包含 <code>APIResponseCompression=false</code> 来禁用。</p><p>特别是对于大型资源或集合， API 响应压缩可以显著减小其响应的大小。例如，针对 Pod 的 <strong>list</strong> 请求可能会返回数百 KB 甚至几 MB 的数据， 具体大小取决于 Pod 数量及其属性。通过压缩响应，可以节省网络带宽并降低延迟。</p><p>要验证 <code>APIResponseCompression</code> 是否正常工作，你可以使用一个 <code>Accept-Encoding</code> 头向 API 服务器发送一个 <strong>get</strong> 或 <strong>list</strong> 请求，并检查响应大小和头信息。例如：</p><pre class="http"><code>GET /api/v1/pods
+Accept-Encoding: gzip
+---
+200 OK
+Content-Type: application/json
+content-encoding: gzip
+...</code></pre><p><code>content-encoding</code> 头表示响应使用 <code>gzip</code> 进行了压缩。</p><h2 id="分块检视大体量结果-retrieving-large-results-sets-in-chunks">分块检视大体量结果 {#retrieving-large-results-sets-in-chunks}</h2><p>在较大规模集群中，检索某些资源类型的集合可能会导致非常大的响应，从而影响服务器和客户端。 例如，一个集群可能有数万个 Pod，每个 Pod 大约相当于 2 KiB 的编码 JSON。 跨所有名字空间检索所有 Pod 可能会导致非常大的响应（10-20MB）并消耗大量服务器资源。</p><p>Kubernetes API 服务器支持将单个大型集合请求分解为许多较小块的能力， 同时保持总体请求的一致性。每个块都可以按顺序返回，这既减少了请求的总大小， 又允许面向用户的客户端增量显示结果以提高响应能力。</p><p>你可以请求 API 服务器通过使用页（Kubernetes 将其称为“块（Chunk）”）的方式来处理 <strong>list</strong>， 完成单个集合的响应。要以块的形式检索单个集合，针对集合的请求支持两个查询参数 <code>limit</code> 和 <code>continue</code>， 并且从集合元 <code>metadata</code> 字段中的所有 <strong>list</strong> 操作返回响应字段 <code>continue</code>。 客户端应该指定他们希望在每个带有 <code>limit</code> 的块中接收的条目数上限，如果集合中有更多资源， 服务器将在结果中返回 <code>limit</code> 资源并包含一个 <code>continue</code> 值。</p><p>作为 API 客户端，你可以在下一次请求时将 <code>continue</code> 值传递给 API 服务器， 以指示服务器返回下一页（<strong>块</strong>）结果。继续下去直到服务器返回一个空的 <code>continue</code> 值， 你可以检索整个集合。</p><p>与 <strong>watch</strong> 操作类似，<code>continue</code> 令牌也会在很短的时间（默认为 5 分钟）内过期， 并在无法返回更多结果时返回 <code>410 Gone</code> 代码。 这时，客户端需要从头开始执行上述检视操作或者忽略 <code>limit</code> 参数。</p><p>例如，如果集群上有 1253 个 Pod，客户端希望每次收到包含至多 500 个 Pod 的数据块，它应按下面的步骤来请求数据块：</p><ol type="1"><li><p>列举集群中所有 Pod，每次接收至多 500 个 Pod：</p><pre class="http"><code>GET /api/v1/pods?limit=500
+---
+200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;PodList&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  &quot;metadata&quot;: {
+    &quot;resourceVersion&quot;:&quot;10245&quot;,
+    &quot;continue&quot;: &quot;ENCODED_CONTINUE_TOKEN&quot;,
+    &quot;remainingItemCount&quot;: 753,
+    ...
+  },
+  &quot;items&quot;: [...] // returns pods 1-500
+}</code></pre></li><li><p>继续前面的调用，返回下一组 500 个 Pod：</p><pre class="http"><code>GET /api/v1/pods?limit=500&amp;continue=ENCODED_CONTINUE_TOKEN
+---
+200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;PodList&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  &quot;metadata&quot;: {
+    &quot;resourceVersion&quot;:&quot;10245&quot;,
+    &quot;continue&quot;: &quot;ENCODED_CONTINUE_TOKEN_2&quot;,
+    &quot;remainingItemCount&quot;: 253,
+    ...
+  },
+  &quot;items&quot;: [...] // returns pods 501-1000
+}</code></pre></li><li><p>继续前面的调用，返回最后 253 个 Pod：</p><pre class="http"><code>GET /api/v1/pods?limit=500&amp;continue=ENCODED_CONTINUE_TOKEN_2
+---
+200 OK
+Content-Type: application/json
+
+{
+  &quot;kind&quot;: &quot;PodList&quot;,
+  &quot;apiVersion&quot;: &quot;v1&quot;,
+  &quot;metadata&quot;: {
+    &quot;resourceVersion&quot;:&quot;10245&quot;,
+    &quot;continue&quot;: &quot;&quot;, // continue token is empty because we have reached the end of the list
+    ...
+  },
+  &quot;items&quot;: [...] // returns pods 1001-1253
+}</code></pre></li></ol><p>请注意，集合的 <code>resourceVersion</code> 在每个请求中保持不变， 这表明服务器正在向你显示 Pod 的一致快照。 在版本 <code>10245</code> 之后创建、更新或删除的 Pod 将不会显示， 除非你在没有继续令牌的情况下发出单独的 <strong>list</strong> 请求。 这使你可以将大请求分成更小的块，然后对整个集合执行 <strong>watch</strong> 操作，而不会丢失任何更新。</p><p><code>remainingItemCount</code> 是集合中未包含在此响应中的后续项目的数量。 如果 <strong>list</strong> 请求包含标签或字段， 则剩余项目的数量是未知的，并且 API 服务器在其响应中不包含 <code>remainingItemCount</code> 字段。 如果 <strong>list</strong> 是完整的（因为它没有分块，或者因为这是最后一个块），没有更多的剩余项目， API 服务器在其响应中不包含 <code>remainingItemCount</code> 字段。 <code>remainingItemCount</code> 的用途是估计集合的大小。</p><h2 id="集合-collections">集合 {#collections}</h2><p>在 Kubernetes 术语中，你从 <strong>list</strong> 中获得的响应是一个“集合（Collection）”。 然而，Kubernetes 为不同类型资源的集合定义了具体类型。 集合的类别名是针对资源类别的，并附加了 <code>List</code>。</p><p>当你查询特定类型的 API 时，该查询返回的所有项目都属于该类型。 例如，当你 <strong>list</strong> Service 对象时，集合响应的 <code>kind</code> 设置为 <code>ServiceList</code>； 该集合中的每个项目都代表一个 Service。例如：</p><pre class="http"><code>GET /api/v1/services</code></pre><div class="sourceCode" id="cb24"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb24-1"><a href="#cb24-1" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span></span>
+<span id="cb24-2"><a href="#cb24-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;kind&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ServiceList&quot;</span><span class="kw">,</span></span>
+<span id="cb24-3"><a href="#cb24-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;apiVersion&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;v1&quot;</span><span class="kw">,</span></span>
+<span id="cb24-4"><a href="#cb24-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;metadata&quot;</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span></span>
+<span id="cb24-5"><a href="#cb24-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">&quot;resourceVersion&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2947301&quot;</span></span>
+<span id="cb24-6"><a href="#cb24-6" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">}</span><span class="at">,</span></span>
+<span id="cb24-7"><a href="#cb24-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;items&quot;</span><span class="kw">:</span></span>
+<span id="cb24-8"><a href="#cb24-8" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="kw">{</span></span>
+<span id="cb24-9"><a href="#cb24-9" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">&quot;metadata&quot;</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span></span>
+<span id="cb24-10"><a href="#cb24-10" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">&quot;name&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;kubernetes&quot;</span><span class="kw">,</span></span>
+<span id="cb24-11"><a href="#cb24-11" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">&quot;namespace&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;default&quot;</span><span class="kw">,</span></span>
+<span id="cb24-12"><a href="#cb24-12" aria-hidden="true" tabindex="-1"></a><span class="at">...</span></span>
+<span id="cb24-13"><a href="#cb24-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">&quot;metadata&quot;</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span></span>
+<span id="cb24-14"><a href="#cb24-14" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">&quot;name&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;kube-dns&quot;</span><span class="kw">,</span></span>
+<span id="cb24-15"><a href="#cb24-15" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">&quot;namespace&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;kube-system&quot;</span><span class="kw">,</span></span>
+<span id="cb24-16"><a href="#cb24-16" aria-hidden="true" tabindex="-1"></a><span class="at">...</span></span></code></pre></div><p>Kubernetes API 中定义了数十种集合类型（如 <code>PodList</code>、<code>ServiceList</code> 和 <code>NodeList</code>）。 你可以从 [Kubernetes API 文档中获取有关每种集合类型的更多信息。</p><p>一些工具，例如 <code>kubectl</code>，对于 Kubernetes 集合的表现机制与 Kubernetes API 本身略有不同。 因为 <code>kubectl</code> 的输出可能包含来自 API 级别的多个 <strong>list</strong> 操作的响应， 所以 <code>kubectl</code> 使用 <code>kind: List</code> 表示项目列表。例如：</p><pre class="shell"><code>kubectl get services -A -o yaml</code></pre><div class="sourceCode" id="cb26"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb26-1"><a href="#cb26-1" aria-hidden="true" tabindex="-1"></a><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb26-2"><a href="#cb26-2" aria-hidden="true" tabindex="-1"></a><span class="fu">kind</span><span class="kw">:</span><span class="at"> List</span></span>
+<span id="cb26-3"><a href="#cb26-3" aria-hidden="true" tabindex="-1"></a><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb26-4"><a href="#cb26-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resourceVersion</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&quot;</span></span>
+<span id="cb26-5"><a href="#cb26-5" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">selfLink</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;&quot;</span></span>
+<span id="cb26-6"><a href="#cb26-6" aria-hidden="true" tabindex="-1"></a><span class="fu">items</span><span class="kw">:</span></span>
+<span id="cb26-7"><a href="#cb26-7" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">apiVersion</span><span class="kw">:</span><span class="at"> v1</span></span>
+<span id="cb26-8"><a href="#cb26-8" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">kind</span><span class="kw">:</span><span class="at"> Service</span></span>
+<span id="cb26-9"><a href="#cb26-9" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">metadata</span><span class="kw">:</span></span>
+<span id="cb26-10"><a href="#cb26-10" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">creationTimestamp</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;2021-06-03T14:54:12Z&quot;</span></span>
+<span id="cb26-11"><a href="#cb26-11" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">labels</span><span class="kw">:</span></span>
+<span id="cb26-12"><a href="#cb26-12" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">component</span><span class="kw">:</span><span class="at"> apiserver</span></span>
+<span id="cb26-13"><a href="#cb26-13" aria-hidden="true" tabindex="-1"></a><span class="at">      </span><span class="fu">provider</span><span class="kw">:</span><span class="at"> kubernetes</span></span>
+<span id="cb26-14"><a href="#cb26-14" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">name</span><span class="kw">:</span><span class="at"> kubernetes</span></span>
+<span id="cb26-15"><a href="#cb26-15" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">namespace</span><span class="kw">:</span><span class="at"> default</span></span>
+<span id="cb26-16"><a href="#cb26-16" aria-hidden="true" tabindex="-1"></a><span class="co">...</span></span>
+<span id="cb26-17"><a href="#cb26-17" aria-hidden="true" tabindex="-1"></a><span class="co">- apiVersion: v1</span></span>
+<span id="cb26-18"><a href="#cb26-18" aria-hidden="true" tabindex="-1"></a><span class="co">  kind: Service</span></span>
+<span id="cb26-19"><a href="#cb26-19" aria-hidden="true" tabindex="-1"></a><span class="co">  metadata:</span></span>
+<span id="cb26-20"><a href="#cb26-20" aria-hidden="true" tabindex="-1"></a><span class="co">    annotations:</span></span>
+<span id="cb26-21"><a href="#cb26-21" aria-hidden="true" tabindex="-1"></a><span class="co">      prometheus.io/port: &quot;9153&quot;</span></span>
+<span id="cb26-22"><a href="#cb26-22" aria-hidden="true" tabindex="-1"></a><span class="co">      prometheus.io/scrape: &quot;true&quot;</span></span>
+<span id="cb26-23"><a href="#cb26-23" aria-hidden="true" tabindex="-1"></a><span class="co">    creationTimestamp: &quot;2021-06-03T14:54:14Z&quot;</span></span>
+<span id="cb26-24"><a href="#cb26-24" aria-hidden="true" tabindex="-1"></a><span class="co">    labels:</span></span>
+<span id="cb26-25"><a href="#cb26-25" aria-hidden="true" tabindex="-1"></a><span class="co">      k8s-app: kube-dns</span></span>
+<span id="cb26-26"><a href="#cb26-26" aria-hidden="true" tabindex="-1"></a><span class="co">      kubernetes.io/cluster-service: &quot;true&quot;</span></span>
+<span id="cb26-27"><a href="#cb26-27" aria-hidden="true" tabindex="-1"></a><span class="co">      kubernetes.io/name: CoreDNS</span></span>
+<span id="cb26-28"><a href="#cb26-28" aria-hidden="true" tabindex="-1"></a><span class="co">    name: kube-dns</span></span>
+<span id="cb26-29"><a href="#cb26-29" aria-hidden="true" tabindex="-1"></a><span class="co">    namespace: kube-system</span></span></code></pre></div><p>请记住，Kubernetes API 没有名为 <code>List</code> 的 <code>kind</code>。</p><p><code>kind: List</code> 是一个客户端内部实现细节，用于处理可能属于不同类别的对象的集合。 在自动化或其他代码中避免依赖 <code>kind: List</code>。</p><h2 id="以表格形式接收资源-receiving-resources-as-tables">以表格形式接收资源 {#receiving-resources-as-tables}</h2><p>当你执行 <code>kubectl get</code> 时，默认的输出格式是特定资源类型的一个或多个实例的简单表格形式。 过去，客户端需要重复 <code>kubectl</code> 中所实现的表格输出和描述输出逻辑，以执行简单的对象列表操作。 该方法的一些限制包括处理某些对象时的不可忽视逻辑。 此外，API 聚合或第三方资源提供的类型在编译时是未知的。 这意味着必须为客户端无法识别的类型提供通用实现。</p><p>为了避免上述各种潜在的局限性，客户端可以请求服务器端返回对象的表格（Table） 表现形式，从而将打印输出的特定细节委托给服务器。 Kubernetes API 实现标准的 HTTP 内容类型（Content Type）协商：为 <code>GET</code> 调用传入一个值为 <code>application/json;as=Table;g=meta.k8s.io;v=v1</code> 的 <code>Accept</code> 头部即可请求服务器以 Table 的内容类型返回对象。</p><p>例如，以 Table 格式列举集群中所有 Pod：</p><pre class="http"><code>GET /api/v1/pods
+Accept: application/json;as=Table;g=meta.k8s.io;v=v1
+---
+200 OK
+Content-Type: application/json
+
+{
+    &quot;kind&quot;: &quot;Table&quot;,
+    &quot;apiVersion&quot;: &quot;meta.k8s.io/v1&quot;,
+    ...
+    &quot;columnDefinitions&quot;: [
+        ...
+    ]
+}</code></pre><p>对于在控制平面上不存在定制的 Table 定义的 API 资源类型而言，服务器会返回一个默认的 Table 响应，其中包含资源的 <code>name</code> 和 <code>creationTimestamp</code> 字段。</p><pre class="http"><code>GET /apis/crd.example.com/v1alpha1/namespaces/default/resources
+---
+200 OK
+Content-Type: application/json
+...
+
+{
+    &quot;kind&quot;: &quot;Table&quot;,
+    &quot;apiVersion&quot;: &quot;meta.k8s.io/v1&quot;,
+    ...
+    &quot;columnDefinitions&quot;: [
+        {
+            &quot;name&quot;: &quot;Name&quot;,
+            &quot;type&quot;: &quot;string&quot;,
+            ...
+        },
+        {
+            &quot;name&quot;: &quot;Created At&quot;,
+            &quot;type&quot;: &quot;date&quot;,
+            ...
+        }
+    ]
+}</code></pre><p>并非所有 API 资源类型都支持 Table 响应； 例如， 可能没有定义字段到表的映射， 扩展核心 Kubernetes API 的 APIService 可能根本不提供 Table 响应。 如果你正在实现使用 Table 信息并且必须针对所有资源类型（包括扩展）工作的客户端， 你应该在 <code>Accept</code> 请求头中指定多种内容类型的请求。例如：</p><pre><code>Accept: application/json;as=Table;g=meta.k8s.io;v=v1, application/json</code></pre><h2 id="资源删除-resource-deletion">资源删除 {#resource-deletion}</h2><p>当你 <strong>delete</strong> 资源时，操作将分两个阶段进行。</p><ol type="1"><li><strong>终结（finalization）</strong></li><li>移除</li></ol><div class="sourceCode" id="cb30"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb30-1"><a href="#cb30-1" aria-hidden="true" tabindex="-1"></a><span class="kw">{</span></span>
+<span id="cb30-2"><a href="#cb30-2" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;kind&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;ConfigMap&quot;</span><span class="kw">,</span></span>
+<span id="cb30-3"><a href="#cb30-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;apiVersion&quot;</span><span class="kw">:</span><span class="at"> </span><span class="st">&quot;v1&quot;</span><span class="kw">,</span></span>
+<span id="cb30-4"><a href="#cb30-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">&quot;metadata&quot;</span><span class="kw">:</span><span class="at"> </span><span class="kw">{</span></span>
+<span id="cb30-5"><a href="#cb30-5" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">&quot;finalizers&quot;</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;url.io/neat-finalization&quot;</span><span class="kw">,</span><span class="at"> </span><span class="st">&quot;other-url.io/my-finalizer&quot;</span><span class="kw">],</span></span>
+<span id="cb30-6"><a href="#cb30-6" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">&quot;deletionTimestamp&quot;</span><span class="kw">:</span><span class="at"> nil</span><span class="kw">,</span></span>
+<span id="cb30-7"><a href="#cb30-7" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="kw">}</span></span>
+<span id="cb30-8"><a href="#cb30-8" aria-hidden="true" tabindex="-1"></a><span class="kw">}</span></span></code></pre></div><p>当客户端第一次发送 <strong>delete</strong> 请求删除资源时，<code>.metadata.deletionTimestamp</code> 设置为当前时间。 一旦设置了 <code>.metadata.deletionTimestamp</code>， 作用于终结器的外部控制器可以在任何时间以任何顺序开始执行它们的清理工作。</p><p>终结器之间<strong>不存在</strong>强制的执行顺序，因为这会带来卡住 <code>.metadata.finalizers</code> 的重大风险。</p><p><code>.metadata.finalizers</code> 字段是共享的：任何有权限的参与者都可以重新排序。 如果终结器列表是按顺序处理的，那么这可能会导致这样一种情况： 在列表中负责第一个终结器的组件正在等待列表中稍后负责终结器的组件产生的某些信号 （字段值、外部系统或其他），从而导致死锁。</p><p>如果没有强制排序，终结者可以在它们之间自由排序，并且不易受到列表中排序变化的影响。</p><p>当最后一个终结器也被移除时，资源才真正从 etcd 中移除。</p><h3 id="强制删除-force-deletion">强制删除 {#force-deletion}</h3><p>如果强制删除依赖于正常的删除流程，这可能会破坏与正强制删除的资源关联的工作负载，因此可能会导致集群出现严重后果。</p><p>通过启用删除选项 <code>ignoreStoreReadErrorWithClusterBreakingPotential</code>， 用户可以对无法解密或损坏的资源执行不安全的强制<strong>删除</strong>操作。 使用此选项需要先启用一个 Alpha 特性门控，默认是禁用的。 要使用此选项，集群操作员必须通过设置命令行选项 <code>--feature-gates=AllowUnsafeMalformedObjectDeletion=true</code> 来启用此特性。</p><p>执行强制<strong>删除</strong>操作的用户必须拥有对给定资源执行 <strong>delete</strong> 和 <strong>unsafe-delete-ignore-read-errors</strong> 动作的权限。</p><p>如果某资源由于</p><ol type="1"><li>转换错误（例如解密失败）或</li><li>对象解码失败</li></ol><p>导致无法从存储中成功检索，则该资源被视为已损坏。 API 服务器会先尝试正常删除，如果由于<strong>资源损坏</strong>的错误而删除失败，则触发强制删除。 强制 <strong>delete</strong> 操作是不安全的，因为它会忽略终结器（Finalizer）约束，并跳过前置条件检查。</p><p>此选项的默认值为 <code>false</code>，这是为了保持向后兼容性。对于将 <code>ignoreStoreReadErrorWithClusterBreakingPotential</code> 设置为 <code>true</code> 的 <strong>delete</strong> 请求， <code>dryRun</code>、<code>gracePeriodSeconds</code>、<code>orphanDependents</code>、<code>preconditions</code> 和 <code>propagationPolicy</code> 字段必须保持不设置。</p><p>如果用户对一个可以以其他方式读取的资源发出将 <code>ignoreStoreReadErrorWithClusterBreakingPotential</code> 设置为 <code>true</code> 的 <strong>delete</strong> 请求，API 服务器将中止此请求并报错。</p><h2 id="单个资源-api-single-resource-api">单个资源 API {#single-resource-api}</h2><p>Kubernetes API 动词 <strong>get</strong>、<strong>create</strong>、<strong>update</strong>、<strong>patch</strong>、<strong>delete</strong> 和 <strong>proxy</strong> 仅支持单一资源。 这些具有单一资源支持的动词不支持在有序或无序列表或事务中一起提交多个资源。</p><p>当客户端（包括 kubectl）对一组资源进行操作时，客户端会发出一系列单资源 API 请求， 然后在需要时聚合响应。</p><p>相比之下，Kubernetes API 动词 <strong>list</strong> 和 <strong>watch</strong> 允许获取多个资源， 而 <strong>deletecollection</strong> 允许删除多个资源。</p><h2 id="字段校验-field-validation">字段校验 {#field-validation}</h2><p>Kubernetes 总是校验字段的类型。例如，如果 API 中的某个字段被定义为数值， 你就不能将该字段设置为文本类型的值。如果某个字段被定义为字符串数组，你只能提供数组。 有些字段可以忽略，有些字段必须填写。忽略 API 请求中的必填字段会报错。</p><p>如果请求中带有集群控制面无法识别的额外字段，API 服务器的行为会更加复杂。</p><p>默认情况下，如果接收到的输入信息中含有 API 服务器无法识别的字段，API 服务器会丢弃该字段 （例如：<code>PUT</code> 请求中的 JSON 主体）。</p><p>API 服务器会在两种情况下丢弃 HTTP 请求中提供的字段。</p><p>这些情况是：</p><ol type="1"><li><p>相关资源的 OpenAPI 模式定义中没有该字段，因此无法识别该字段（有种例外情形是，</p><p>通过 <code>x-kubernetes-preserve-unknown-fields</code> 显式选择不删除未知字段）。</p></li><li><p>字段在对象中重复出现。</p></li></ol><h3 id="检查无法识别或重复的字段-setting-the-field-validation-level">检查无法识别或重复的字段 {#setting-the-field-validation-level}</h3><p>从 1.25 开始，当使用可以提交数据的 HTTP 动词（<code>POST</code>、<code>PUT</code> 和 <code>PATCH</code>）时， 将通过服务器上的校验检测到对象中无法识别或重复的字段。 校验的级别可以是 <code>Ignore</code>、<code>Warn</code>（默认值） 和 <code>Strict</code> 之一。</p><p><code>Ignore</code> : 使 API 服务器像没有遇到错误字段一样成功处理请求，丢弃所有的未知字段和重复字段，并且不发送丢弃字段的通知。</p><p><code>Warn</code> :（默认值）使 API 服务器成功处理请求，并向客户端发送告警信息。告警信息通过 <code>Warning:</code> 响应头发送， 并为每个未知字段或重复字段添加一条告警信息。有关告警和相关的 Kubernetes API 的信息， 可参阅博文告警：增加实用告警功能。</p><p><code>Strict</code> : API 服务器检测到任何未知字段或重复字段时，拒绝处理请求并返回 400 Bad Request 错误。 来自 API 服务器的响应消息列出了 API 检测到的所有未知字段或重复字段。</p><p>字段校验级别可通过查询参数 <code>fieldValidation</code> 来设置。</p><p>如果你提交的请求中设置了一个无法被识别的字段，并且该请求存在因其他原因引起的不合法 （例如，请求为某已知字段提供了一个字符串值，而 API 期望该字段为整数）， 那么 API 服务器会以 400 Bad Request 错误作出响应，但不会提供有关未知或重复字段的任何信息 （仅提供它首先遇到的致命错误）。</p><p>在这种情况下，不管你设置哪种字段校验级别，你总会收到出错响应。</p><p>向服务器提交请求的工具（例如 <code>kubectl</code>）可能会设置自己的默认值，与 API 服务器默认使用的 <code>Warn</code> 校验层级不同。</p><p><code>kubectl</code> 工具使用 <code>--validate</code> 标志设置字段校验层级。 该字段可取的值包括 <code>ignore</code>、<code>warn</code> 和 <code>strict</code>，同时还接受值 <code>true</code>（相当于 <code>strict</code>）和 <code>false</code>（相当于 <code>ignore</code>）。 kubectl 默认的校验设置是 <code>--validate=true</code> ，这意味着执行严格的服务端字段校验。</p><p>当 kubectl 无法连接到启用字段校验的 API 服务器（Kubernetes 1.27 之前的 API 服务器）时， 将回退到使用客户端的字段校验。 客户端校验将在 kubectl 未来版本中被完全删除。</p><p>在 Kubernetes 1.25 之前，<code>kubectl --validate</code> 是用来开启或关闭客户端校验的布尔标志的命令。</p><h2 id="试运行-dry-run">试运行 {#dry-run}</h2><p>当你使用可以修改资源的 HTTP 动词（<code>POST</code>、<code>PUT</code>、<code>PATCH</code> 和 <code>DELETE</code>）时， 你可以在 <strong>试运行（dry run）</strong> 模式下提交你的请求。 试运行模式有助于通过典型的请求阶段（准入链、验证、合并冲突）评估请求，直到将对象持久化到存储中。 请求的响应正文尽可能接近非试运行响应。Kubernetes 保证试运行请求不会被持久化存储或产生任何其他副作用。</p><h3 id="发起试运行请求-make-a-dry-run-request">发起试运行请求 {#make-a-dry-run-request}</h3><p>通过设置 <code>dryRun</code> 查询参数触发试运行。此参数是一个字符串，用作枚举，唯一可接受的值是：</p><p>[未设置值] : 允许副作用。你可以使用 <code>?dryRun</code> 或 <code>?dryRun&amp;pretty=true</code> 之类的查询字符串请求此操作。 响应是最终会被持久化的对象，或者如果请求不能被满足则会出现一个错误。</p><p><code>All</code> : 每个阶段都正常运行，除了防止副作用的最终存储阶段。</p><p>当你设置 <code>?dryRun=All</code> 时，将运行任何相关的， 验证准入控制器检查经过变更的请求，针对 <code>PATCH</code> 请求执行合并、设置字段默认值等操作，并进行模式验证。 更改不会持久化到底层存储，但本应持久化的最终对象仍会与正常状态代码一起返回给用户。</p><p>如果请求的非试运行版本会触发具有副作用的准入控制器，则该请求将失败，而不是冒不希望的副作用的风险。 所有内置准入控制插件都支持试运行。 此外，准入 Webhook 还可以设置配置对象 的 <code>sideEffects</code> 字段为 <code>None</code>，借此声明它们没有副作用。</p><p>如果 Webhook 确实有副作用，则应该将 <code>sideEffects</code> 字段设置为 “NoneOnDryRun”。 如果还修改了 Webhook 以理解 AdmissionReview 中的 DryRun 字段， 并防止对标记为试运行的任何请求产生副作用，则该更改是适当的。</p><p>这是一个使用 <code>?dryRun=All</code> 的试运行请求的示例：</p><pre class="http"><code>POST /api/v1/namespaces/test/pods?dryRun=All
+Content-Type: application/json
+Accept: application/json</code></pre><p>响应会与非试运行模式请求的响应看起来相同，只是某些生成字段的值可能会不同。</p><h3 id="生成值-generated-values">生成值 {#generated-values}</h3><p>对象的某些值通常是在对象被写入数据库之前生成的。很重要的一点是不要依赖试运行请求为这些字段所设置的值， 因为试运行模式下所得到的这些值与真实请求所获得的值很可能不同。这类字段有：</p><ul><li><code>name</code>：如果设置了 <code>generateName</code> 字段，则 <code>name</code> 会获得一个唯一的随机名称</li><li><code>creationTimestamp</code> / <code>deletionTimestamp</code>：记录对象的创建/删除时间</li><li><code>UID</code>：唯一标识对象， 取值随机生成（非确定性）</li><li><code>resourceVersion</code>：跟踪对象的持久化（存储）版本</li><li>变更性准入控制器所设置的字段</li><li>对于 <code>Service</code> 资源：<code>kube-apiserver</code> 为 <code>Service</code> 对象分配的端口和 IP 地址</li></ul><h3 id="试运行的授权-dry-run-authorization">试运行的授权 {#dry-run-authorization}</h3><p>试运行和非试运行请求的鉴权是完全相同的。因此，要发起一个试运行请求， 你必须被授权执行非试运行请求。</p><p>例如，要在 Deployment 对象上试运行 <strong>patch</strong> 操作，你必须具有对 Deployment 执行 <strong>patch</strong> 操作的访问权限， 如下面的 规则所示：</p><div class="sourceCode" id="cb32"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb32-1"><a href="#cb32-1" aria-hidden="true" tabindex="-1"></a><span class="fu">rules</span><span class="kw">:</span></span>
+<span id="cb32-2"><a href="#cb32-2" aria-hidden="true" tabindex="-1"></a><span class="kw">-</span><span class="at"> </span><span class="fu">apiGroups</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;apps&quot;</span><span class="kw">]</span></span>
+<span id="cb32-3"><a href="#cb32-3" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">resources</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;deployments&quot;</span><span class="kw">]</span></span>
+<span id="cb32-4"><a href="#cb32-4" aria-hidden="true" tabindex="-1"></a><span class="at">  </span><span class="fu">verbs</span><span class="kw">:</span><span class="at"> </span><span class="kw">[</span><span class="st">&quot;patch&quot;</span><span class="kw">]</span></span></code></pre></div><p>参阅鉴权概述以了解鉴权细节。</p><h2 id="更新现有资源-patch-and-apply">更新现有资源 {#patch-and-apply}</h2><p>Kubernetes 提供了多种更新现有对象的方式。 你可以阅读选择更新机制以了解哪种方法可能最适合你的用例。</p><p>你可以使用 HTTP PUT 覆盖（<strong>update</strong>）ConfigMap 等现有资源。 对于 PUT 请求，客户端需要指定 <code>resourceVersion</code>（从要更新的对象中获取此项）。 Kubernetes 使用该 <code>resourceVersion</code> 信息，这样 API 服务器可以检测丢失的更新并拒绝对集群来说过期的客户端所发出的请求。 如果资源已发生变化（即客户端提供的 <code>resourceVersion</code> 已过期），API 服务器将返回 <code>409 Conflict</code> 错误响应。</p><p>客户端除了发送 PUT 请求之外，还可以发送指令给 API 服务器对现有资源执行 <strong>patch</strong> 操作。 <strong>patch</strong> 通常适用于客户端希望进行的更改并不依赖于现有数据的场景。 需要有效检测丢失更新的客户端应该考虑根据现有 <code>resourceVersion</code> 来进行有条件的请求 （HTTP PUT 或 HTTP PATCH），并在存在冲突时作必要的重试。</p><p>Kubernetes API 支持四种不同的 PATCH 操作，具体取决于它们所对应的 HTTP <code>Content-Type</code> 标头：</p><p><code>application/apply-patch+yaml</code> : Server Side Apply YAML（基于 YAML 的 Kubernetes 扩展）。 所有 JSON 文档都是有效的 YAML，因此你也可以使用此媒体类型提交 JSON。 更多细节参阅服务器端应用序列化。 对于 Kubernetes，这一 PATCH 请求在对象不存在时成为 <strong>create</strong> 操作；在对象已存在时成为 <strong>patch</strong> 操作。</p><p><code>application/json-patch+json</code> : JSON Patch，如 RFC6902 中定义。 JSON Patch 是对资源执行的一个操作序列；例如 <code>{"op": "add", "path": "/a/b/c", "value": [ "foo", "bar" ]}</code>。 对于 Kubernetes，这一 PATCH 请求即是一个 <strong>patch</strong> 操作。</p><p>使用 <code>application/json-patch+json</code> 的 <strong>patch</strong> 可以包含用于验证一致性的条件， 如果这些条件不满足，则允许此操作失败（例如避免丢失更新）。</p><p><code>application/merge-patch+json</code> : JSON Merge Patch，如 RFC7386 中定义。 JSON Merge Patch 实质上是资源的部分表示。提交的 JSON 与当前资源合并以创建一个新资源，然后将其保存。 对于 Kubernetes，这个 PATCH 请求是一个 <strong>patch</strong> 操作。</p><p><code>application/strategic-merge-patch+json</code> : Strategic Merge Patch（基于 JSON 的 Kubernetes 扩展）。 Strategic Merge Patch 是 JSON Merge Patch 的自定义实现。 你只能在内置 API 或具有特殊支持的聚合 API 服务器中使用 Strategic Merge Patch。 你不能针对任何使用 定义的 API 来使用 <code>application/strategic-merge-patch+json</code>。</p><p>Kubernetes <strong>服务器端应用</strong>机制已取代 Strategic Merge Patch。</p><p>Kubernetes 的服务器端应用功能允许控制平面跟踪新创建对象的托管字段。 服务端应用为管理字段冲突提供了清晰的模式，提供了服务器端 <strong>apply</strong> 和 <strong>update</strong> 操作， 并替换了 <code>kubectl apply</code> 的客户端功能。</p><p>对于服务器端应用，Kubernetes 在对象尚不存在时将请求视为 <strong>create</strong>，否则视为 <strong>patch</strong>。 对于其他在 HTTP 层面使用 PATCH 的请求，逻辑上的 Kubernetes 操作始终是 <strong>patch</strong>。</p><p>更多细节参阅服务器端应用。</p><h3 id="选择更新机制-update-mechanism-choose">选择更新机制 {#update-mechanism-choose}</h3><h4 id="http-put-替换现有资源-update-mechanism-update">HTTP PUT 替换现有资源 {#update-mechanism-update}</h4><p><strong>update</strong>（HTTP <code>PUT</code>）操作实现简单且灵活，但也存在一些缺点：</p><ul><li>你需要处理对象的 <code>resourceVersion</code> 在客户端读取和写回之间发生变化所造成的冲突。 Kubernetes 总是会检测到此冲突，但你作为客户端开发者需要实现重试机制。</li><li>如果你在本地解码对象，可能会意外丢失字段。例如你在使用 client-go 时， 可能会收到客户端不知道如何处理的一些字段，而客户端在构造更新时会将这些字段丢弃。</li><li>如果对象上存在大量争用（即使是在你不打算编辑的某字段或字段集上），你可能会难以发送更新。 对于体量较大或字段较多的对象，这个问题会更为严重。</li></ul><h4 id="使用-json-patch-的-http-patch-update-mechanism-json-patch">使用 JSON Patch 的 HTTP PATCH {#update-mechanism-json-patch}</h4><p><strong>patch</strong> 更新很有帮助，因为：</p><ul><li><p>由于你只发送差异，所以你在 <code>PATCH</code> 请求中需要发送的数据较少。</p></li><li><p>你可以依赖于现有值进行更改，例如将特定字段的值复制到注解中。</p></li><li><p>与 <strong>update</strong>（HTTP <code>PUT</code>）不同，即使存在对无关字段的频繁更改，你的更改也可以立即生效： 你通常无需重试。</p><ul><li>如果你要特别小心避免丢失更新，仍然可能需要指定 <code>resourceVersion</code>（以匹配现有对象）。</li><li>编写一些重试逻辑以处理错误仍然是一个良好的实践。</li></ul></li><li><p>你可以通过测试条件来精确地构造特定的更新条件。 例如，如果现有值与你期望的值匹配，你可以递增计数器而无需读取它。 即使自上次写入以来对象以其他方式发生了更改，你也可以做到这一点而不会遇到丢失更新的风险。 （如果测试条件失败，你可以回退为读取当前值，然后写回更改的数字）。</p></li></ul><p>然而：</p><ul><li>你需要更多本地（客户端）逻辑来构建补丁；如果你拥有实现了 JSON Patch 的库， 或者针对 Kubernetes 生成特定的 JSON Patch 的库，将非常有帮助。</li><li>作为客户端软件的开发者，你在构建补丁（HTTP 请求体）时需要小心，避免丢弃字段（操作顺序很重要）。</li></ul><h4 id="使用服务器端应用的-http-patch-update-mechanism-server-side-apply">使用服务器端应用的 HTTP PATCH {#update-mechanism-server-side-apply}</h4><p>服务器端应用（Server-Side Apply）具有一些明显的优势：</p><ul><li>仅需一次轮询：通常无需先执行 <code>GET</code> 请求。<ul><li>并且你仍然可以检测到意外更改造成的冲突</li><li>合适的时候，你可以选择强制覆盖冲突</li></ul></li><li>客户端实现简单。</li><li>你可以轻松获得原子级别的 create 或 update 操作，无需额外工作 （类似于某些 SQL 语句中的 <code>UPSERT</code>）。</li></ul><p>然而：</p><ul><li>服务器端应用不适合依赖对象当前值的字段更改。</li><li>你只能更新对象。Kubernetes HTTP API 中的某些资源不是对象（它们没有 <code>.metadata</code> 字段）， 并且服务器端应用只能用于 Kubernetes 对象。</li></ul><h2 id="资源版本-resource-versions">资源版本 {#resource-versions}</h2><p>资源版本是标识服务器内部对象版本的字符串。 客户端可以使用资源版本来确定对象何时更改， 或者在获取、列出和监视资源时表达数据一致性要求。 资源版本必须被客户端视为不透明的，并且未经修改地传回服务器。</p><p>你不能假设资源版本是数字的或可排序的。 API 客户端只能比较两个资源版本的相等性（这意味着你不能比较资源版本的大于或小于关系）。</p><h3 id="metadata-中的-resourceversion-resourceversion-in-metadata">metadata 中的 <code>resourceVersion</code> {#resourceVersion-in-metadata}</h3><p>客户端在资源中查找资源版本，这些资源包括来自用于 <strong>watch</strong> 的响应流资源，或者使用 <strong>list</strong> 枚举的资源。</p><p>v1.meta/ObjectMeta - 资源的 <code>metadata.resourceVersion</code> 值标明该实例上次被更改时的资源版本。</p><p>v1.meta/ListMeta - 资源集合即 <strong>list</strong> 操作的响应）的 <code>metadata.resourceVersion</code> 所标明的是 list 响应被构造时的资源版本。</p><h3 id="查询字符串中的-resourceversion-参数-the-resourceversion-parameter">查询字符串中的 <code>resourceVersion</code> 参数 {#the-resourceversion-parameter}</h3><p><strong>get</strong>、<strong>list</strong> 和 <strong>watch</strong> 操作支持 <code>resourceVersion</code> 参数。 从 v1.19 版本开始，Kubernetes API 服务器支持 <strong>list</strong> 请求的 <code>resourceVersionMatch</code> 参数。</p><p>API 服务器根据你请求的操作和 <code>resourceVersion</code> 的值对 <code>resourceVersion</code> 参数进行不同的解释。 如果你设置 <code>resourceVersionMatch</code> 那么这也会影响匹配发生的方式。</p><h3 id="get-和-list-语义-semantics-for-get-and-list"><strong>get</strong> 和 <strong>list</strong> 语义 {#semantics-for-get-and-list}</h3><p>对于 <strong>get</strong> 和 <strong>list</strong> 而言，<code>resourceVersion</code> 的语义为：</p><p><strong>get：</strong></p><table><thead><tr class="header"><th>resourceVersion 未设置</th><th>resourceVersion="0"</th><th>resourceVersion=""</th></tr></thead><tbody><tr class="odd"><td>最新版本</td><td>任何版本</td><td>不老于给定版本</td></tr></tbody></table><p><strong>list：</strong></p><p>从 v1.19 版本开始，Kubernetes API 服务器支持 <strong>list</strong> 请求的 <code>resourceVersionMatch</code> 参数。 如果同时设置 <code>resourceVersion</code> 和 <code>resourceVersionMatch</code>， 则 <code>resourceVersionMatch</code> 参数确定 API 服务器如何解释 <code>resourceVersion</code>。</p><p>在 <strong>list</strong> 请求上设置 <code>resourceVersion</code> 时，你应该始终设置 <code>resourceVersionMatch</code> 参数。 但是，请准备好处理响应的 API 服务器不知道 <code>resourceVersionMatch</code> 并忽略它的情况。</p><p>除非你对一致性有着非常强烈的需求，使用 <code>resourceVersionMatch=NotOlderThan</code> 同时为 <code>resourceVersion</code> 设定一个已知值是优选的交互方式，因为与不设置 <code>resourceVersion</code> 和 <code>resourceVersionMatch</code> 相比，这种配置可以取得更好的集群性能和可扩缩性。 后者需要提供带票选能力的读操作。</p><p>设置 <code>resourceVersionMatch</code> 参数而不设置 <code>resourceVersion</code> 参数是不合法的。</p><p>下表解释了具有各种 <code>resourceVersion</code> 和 <code>resourceVersionMatch</code> 组合的 <strong>list</strong> 请求的行为：</p><table><thead><tr class="header"><th>resourceVersionMatch 参数</th><th>分页参数</th><th>resourceVersion 未设置</th><th>resourceVersion="0"</th><th>resourceVersion=""</th></tr></thead><tbody><tr class="odd"><td><strong>未设置</strong></td><td><strong>limit 未设置</strong></td><td>最新版本</td><td>任意版本</td><td>不老于指定版本</td></tr><tr class="even"><td><strong>未设置</strong></td><td>limit=, <strong>continue 未设置</strong></td><td>最新版本</td><td>任意版本</td><td>精确匹配</td></tr><tr class="odd"><td><strong>未设置</strong></td><td>limit=, continue=\</td><td>从 token 开始、精确匹配</td><td>非法请求，视为从 token 开始、精确匹配</td><td>非法请求，返回 HTTP <code>400 Bad Request</code></td></tr><tr class="even"><td><code>resourceVersionMatch=Exact</code> [1]</td><td><strong>limit 未设置</strong></td><td>非法请求</td><td>非法请求</td><td>精确匹配</td></tr><tr class="odd"><td><code>resourceVersionMatch=Exact</code> [1]</td><td>limit=, <strong>continue 未设置</strong></td><td>非法请求</td><td>非法请求</td><td>精确匹配</td></tr><tr class="even"><td><code>resourceVersionMatch=NotOlderThan</code> [1]</td><td><strong>limit 未设置</strong></td><td>非法请求</td><td>任意版本</td><td>不老于指定版本</td></tr><tr class="odd"><td><code>resourceVersionMatch=NotOlderThan</code> [1]</td><td>limit=, <strong>continue 未设置</strong></td><td>非法请求</td><td>任意版本</td><td>不老于指定版本</td></tr></tbody></table><p>如果你的集群的 API 服务器不支持 <code>resourceVersionMatch</code> 参数， 则行为与你未设置它时相同。</p><p><strong>get</strong> 和 <strong>list</strong> 的语义是：</p><p>任意版本 : 返回任何资源版本的数据。最新可用资源版本优先，但不需要强一致性； 可以提供任何资源版本的数据。由于分区或过时的缓存， 请求可能返回客户端先前观察到的更旧资源版本的数据，特别是在高可用性配置中。 不能容忍这种情况的客户不应该使用这种语义。 始终通过<strong>监视缓存</strong>提供服务，提高性能并减少 etcd 负载。</p><p>最新版本 : 返回最新资源版本的数据。 返回的数据必须一致（详细说明：通过仲裁读取从 etcd 提供）。 对于 etcd v3.4.31+ 和 v3.5.13+ Kubernetes 使用<strong>监视缓存</strong>来为“最新”读取提供服务： 监视缓存是 API 服务器内部的基于内存的存储，用于缓存和镜像持久化到 etcd 中的数据状态。 Kubernetes 请求进度通知以维护与 etcd 持久层的缓存一致性。Kubernetes 版本 v1.28 至 v1.30 也支持此特性，尽管当时其处于 Alpha 状态，不推荐用于生产， 也不默认启用，直到 v1.31 版本才启用。</p><p>不老于指定版本 : 返回数据至少与提供的 <code>resourceVersion</code> 一样新。 最新的可用数据是首选，但可以提供不早于提供的 <code>resourceVersion</code> 的任何数据。 对于对遵守 <code>resourceVersionMatch</code> 参数的服务器的 <strong>list</strong> 请求， 这保证了集合的 <code>.metadata.resourceVersion</code> 不早于请求的 <code>resourceVersion</code>， 但不保证该集合中任何项目的 <code>.metadata.resourceVersion</code>。 始终通过<strong>监视缓存</strong>提供服务，提高性能并减少 etcd 负载。</p><p>精确匹配 : 以提供的确切资源版本返回数据。如果提供的 <code>resourceVersion</code> 不可用， 则服务器以 HTTP <code>410 Gone</code> 响应。对于对支持 <code>resourceVersionMatch</code> 参数的服务器的 <strong>list</strong> 请求， 这可以保证集合的 <code>.metadata.resourceVersion</code> 与你在查询字符串中请求的 <code>resourceVersion</code> 相同。 该保证不适用于该集合中任何项目的 <code>.metadata.resourceVersion</code>。</p><p>默认情况下，由 <strong>etcd</strong> 提供服务，但是当启用了 <code>ListFromCacheSnapshot</code> 特性门控时， 如果可用，API 服务器将尝试从快照提供响应。 这提升了性能并减少了 etcd 的负载。缓存快照默认保留 75 秒， 因此如果提供的 <code>resourceVersion</code> 不可用，服务器将回退到 etcd。</p><p>续页 : 为分页列表请求返回下一页数据，确保与序列中初始请求建立的确切 <code>resourceVersion</code> 保持一致。 对带有限制的 <strong>list</strong> 请求的响应包括 <strong>continue 令牌</strong>，它编码了 <code>resourceVersion</code> 和最后观察到的位置，给出继续列表的起点。 如果提供的 <strong>continue 令牌</strong>中的 <code>resourceVersion</code> 不可用，服务器将返回 HTTP <code>410 Gone</code>。 默认情况下，由 <strong>etcd</strong> 提供服务，但是当启用了 <code>ListFromCacheSnapshot</code> 特性门控时， API 服务器将尝试从快照提供响应（如果缓存快可用）。 这提升了性能并减少了 etcd 的负载。缓存快照默认保留 75 秒， 因此如果提供的 <strong>continue 令牌</strong>中的 <code>resourceVersion</code> 不可用，服务器将回退到 etcd。</p><p>当你 <strong>list</strong> 资源并收到集合响应时， 响应包括集合的列表元数据。 以及该集合中每个项目的对象元数据。 对于在集合响应中找到的单个对象，<code>.metadata.resourceVersion</code> 跟踪该对象的最后更新时间， 而不是对象在服务时的最新程度。</p><p>当使用 <code>resourceVersionMatch=NotOlderThan</code> 并设置了限制时， 客户端必须处理 HTTP <code>410 Gone</code> 响应。 例如，客户端可能会使用更新的 <code>resourceVersion</code> 重试或回退到 <code>resourceVersion=""</code>。</p><p>当使用 <code>resourceVersionMatch=Exact</code> 并且未设置限制时， 客户端必须验证集合的 <code>.metadata.resourceVersion</code> 是否与请求的 <code>resourceVersion</code> 匹配， 并处理不匹配的情况。例如，客户端可能会退回到设置了限制的请求。</p><h3 id="watch-语义-semantics-for-watch"><strong>watch</strong> 语义 {#semantics-for-watch}</h3><p>对于 <strong>watch</strong> 操作而言，资源版本的语义如下：</p><p><strong>watch：</strong></p><table><thead><tr class="header"><th>resourceVersion 未设置</th><th>resourceVersion="0"</th><th>resourceVersion=""</th></tr></thead><tbody><tr class="odd"><td>读取状态并从最新版本开始</td><td>读取状态并从任意版本开始</td><td>从指定版本开始</td></tr></tbody></table><p><strong>watch</strong> 操作语义的含义如下：</p><p>读取状态并从任意版本开始 : 在任何资源版本开始 <strong>watch</strong>；首选可用的最新资源版本，但不是必需的。允许任何起始资源版本。 由于分区或过时的缓存，<strong>watch</strong> 可能从客户端之前观察到的更旧的资源版本开始， 特别是在高可用性配置中。不能容忍这种明显倒带的客户不应该用这种语义启动 <strong>watch</strong>。 为了建立初始状态，<strong>watch</strong> 从起始资源版本中存在的所有资源实例的合成 “添加” 事件开始。 以下所有监视事件都针对在 <strong>watch</strong> 开始的资源版本之后发生的所有更改。</p><p>以这种方式初始化的 <strong>watch</strong> 可能会返回任意陈旧的数据。 请在使用之前查看此语义，并尽可能支持其他语义。</p><p>读取状态并从最新版本开始 : 从最近的资源版本开始 <strong>watch</strong>， 它必须是一致的（详细说明：通过仲裁读取从 etcd 提供服务）。 为了建立初始状态，<strong>watch</strong> 从起始资源版本中存在的所有资源实例的合成 “添加” 事件开始。 以下所有监视事件都针对在 <strong>watch</strong> 开始的资源版本之后发生的所有更改。</p><p>从指定版本开始 : 以确切的资源版本开始 <strong>watch</strong>。监视事件适用于提供的资源版本之后的所有更改。 与 “Get State and Start at Most Recent” 和 “Get State and Start at Any” 不同， <strong>watch</strong> 不会以所提供资源版本的合成 “添加” 事件启动。 由于客户端提供了资源版本，因此假定客户端已经具有起始资源版本的初始状态。</p><h3 id="410-gone-响应-410-gone-responses">"410 Gone" 响应 {#410-gone-responses}</h3><p>服务器不需要提供所有老的资源版本，在客户端请求的是早于服务器端所保留版本的 <code>resourceVersion</code> 时，可以返回 HTTP <code>410 (Gone)</code> 状态码。 客户端必须能够容忍 <code>410 (Gone)</code> 响应。 参阅高效检测变更以了解如何在监测资源时处理 <code>410 (Gone)</code> 响应。</p><p>如果所请求的 <code>resourceVersion</code> 超出了可应用的 <code>limit</code>， 那么取决于请求是否是通过高速缓存来满足的，API 服务器可能会返回一个 <code>410 Gone</code> HTTP 响应。</p><h3 id="不可用的资源版本-unavailable-resource-versions">不可用的资源版本 {#unavailable-resource-versions}</h3><p>服务器不需要提供无法识别的资源版本。 如果你请求了 <strong>list</strong> 或 <strong>get</strong> API 服务器无法识别的资源版本，则 API 服务器可能会：</p><ul><li>短暂等待资源版本可用，如果提供的资源版本在合理的时间内仍不可用， 则应超时并返回 <code>504 (Gateway Timeout)</code>；</li><li>使用 <code>Retry-After</code> 响应标头进行响应，指示客户端在重试请求之前应等待多少秒。</li></ul><p>如果你请求 API 服务器无法识别的资源版本， kube-apiserver 还会使用 <code>Too large resource version</code> 消息额外标识其错误响应。</p><p>如果你对无法识别的资源版本发出 <strong>watch</strong> 请求， API 服务器可能会无限期地等待（直到请求超时）资源版本变为可用。</p>
+</body>
+</html>

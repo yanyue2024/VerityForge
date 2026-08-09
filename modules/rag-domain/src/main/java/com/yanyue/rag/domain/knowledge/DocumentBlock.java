@@ -1,7 +1,7 @@
 package com.yanyue.rag.domain.knowledge;
 
 import com.yanyue.rag.contract.parser.BlockType;
-import com.yanyue.rag.domain.chunking.v4.OffsetUnit;
+import com.yanyue.rag.domain.chunking.OffsetUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;

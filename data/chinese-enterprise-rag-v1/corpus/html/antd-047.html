@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>非必要的渲染</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">非必要的渲染</h1>
+</header>
+<h1 id="非必要的渲染">非必要的渲染</h1><p>对于重型组件而言，随着时间推移，一些 BUG Fix 或者新增 Feature 很容易不经意间将原本的性能优化给破坏掉。而最近，我们在对 Table 进行重构将一些历史更新导致的性能损失进行排查并恢复。在此，我们介绍一些常用的排查技巧以及常见问题。</p><p>在此之前，我们建议你先阅读官方的 性能工具 以选择你需要调试的内容。</p><h3 id="渲染次数统计">渲染次数统计</h3><p>在大部分情况下，无效的渲染相对于未优化的循环而言，体感并没有那么强烈。但是在某一些场景诸如大型表单、表格、列表下，由于其子组件众多，无效的渲染叠加后其性能影响也十分可怕。</p><p>举个例子，在 antd v4 中，我们为了提升 <code>rowSpan</code> Table Hover 的高亮体验，我们为 <code>tr</code> 添加了事件监听，同时在 <code>td</code> 中为选中行添加额外的 <code>className</code> 以支持多行高亮能力。但是由于 <code>td</code> 消费了 context 中 <code>hoverStartRow</code> 和 <code>hoverEndRow</code> 数据，导致了非相关 Row 都会因为 <code>hoverStartRow</code> 和 <code>hoverEndRow</code> 变化而重新渲染。</p><p>诸如此类的问题在重型组件循环往复，因而我们需要一些辅助方式来确定渲染次数。在最新的 <code>@rc-component/table</code> 中，我们封装了一个 <code>useRenderTimes</code> 方法。它会在开发模式下通过 React 的 <code>useDebugValue</code> 将监听的渲染次数标注在 React Dev Tools 上：</p><p>图片说明：VDM</p><pre class="tsx"><code>// Sample Code, please view real world code if needed
+
+function useRenderTimes(props: T) {
+  // Render times
+  const timesRef = React.useRef(0);
+  timesRef.current += 1;
+
+  // Cache for prev props
+  const cacheProps = React.useRef(props);
+  const changedPropKeys = getDiff(props, cacheProps.current); // Some compare logic
+
+  React.useDebugValue(timesRef.current);
+  React.useDebugValue(changedPropKeys);
+
+  cacheProps.current = props;
+}
+</code></pre><h3 id="context">Context</h3><h4 id="usememo">useMemo</h4><p>一般在组件的根节点上，我们会根据 <code>props</code> 和 <code>state</code> 创建一个 Context 来将聚合数据传递下去。但是在某些情况下可能 Context 实际内容没有变化也触发子组件的重新渲染：</p><pre class="tsx"><code>// pseudocode
+const MyContext = React.createContext();
+
+const Child = React.memo(() =&gt; {
+  const { prop1 } = React.useContext(MyContext);
+  return &lt;&gt;{prop1};
+});
+
+const Root = ({ prop1, prop2 }) =&gt; {
+  const [count, setCount] = React.useState(0);
+
+  // Some logic to trigger rerender
+  React.useEffect(() =&gt; {
+    setCount(1);
+  }, []);
+
+  return (
+
+  );
+};</code></pre><p>在示例中，虽然 <code>prop1</code> 和 <code>prop2</code> 并没有变化，但是显然 MyContext 里的 <code>value</code> 是一个新的 Object 导致子组件即便 <code>prop1</code> 没有变化也会重新渲染。因而我们需要对 Context <code>value</code> 进行 Memo：</p><pre class="tsx"><code>// pseudocode
+const context = React.useMemo(() =&gt; ({ prop1, prop2 }), [prop1, prop2]);
+
+return (
+
+);</code></pre><p>注：你可以配置 eslint 规则 来避免遗漏。</p><h4 id="拆分-context">拆分 Context</h4><p>此外，参考上面的示例。如果我们将 <code>prop1</code> 和 <code>prop2</code> 都放在 Context 中，那么即便 <code>prop1</code> 没有变化，<code>prop2</code> 变化了，也会导致子组件重新渲染。因而我们可以根据功能将 Context 拆分成多个，从而减小影响范围：</p><pre class="tsx"><code>// pseudocode
+const MyContext1 = React.createContext();
+const MyContext2 = React.createContext();
+
+// Child
+const { prop1 } = React.useContext(MyContext1);
+
+// Root
+
+;</code></pre><p>在 <code>@rc-component/table</code> 中，我们将其拆分为多个以优化渲染性能：</p><ul><li>BodyContext</li><li>ExpandedRowContext</li><li>HoverContext</li><li>PerfContext</li><li>ResizeContext</li><li>StickyContext</li><li>TableContext</li></ul><h4 id="usecontextselector">useContextSelector</h4><p>如果你使用过 Redux，那么你可能会对 <code>useSelector</code> 比较熟悉，它只会在需要消费的数据变更时才会触发更新。在 React 中，也同样有相关的 RFC(#118)(#119)，未来在 React 18 也将实装：</p><p>图片说明：React 18</p><p>在 API 正式落地之前，业界也有不少三方库实现该 API（当然，你也可以直接使用 redux）。通过 <code>useContextSelector</code> 就不再需要考虑功能拆分 Context 的问题，这也降低了开发者的心智负担：</p><pre class="tsx"><code>// pseudocode
+const Child = React.memo(() =&gt; {
+  const prop1 = useContextSelector(MyContext, (context) =&gt; context.prop1);
+  return &lt;&gt;{prop1};
+});</code></pre><h3 id="闭包问题">闭包问题</h3><p>在通过各种方式优化过后，我们还不得不面对一个问题。如果某些渲染需要通过外界的 render 方式，并且碰巧该方式使用了闭包。那么 <code>React.memo</code> 是无法感知的：</p><pre class="tsx"><code>// pseudocode
+
+const MyComponent = React.memo React.ReactElement }&gt;(({ valueRender }) =&gt;
+  valueRender(),
+);
+
+const App = () =&gt; {
+  const countRef = React.useRef(0);
+  const [, forceUpdate] = React.useState({});
+
+  React.useEffect(() =&gt; {
+    countRef.current += 1;
+    forceUpdate({});
+  }, []);
+
+  // In real world, class component often meet this by `this.state`
+  const valueRender = React.useCallback(() =&gt; countRef.current, []);
+
+  return ;
+};</code></pre><p>由于闭包的存在，在调用 <code>render</code> 方法之前我们无法确定组件最终形态是否发生变化，这也是为何在 antd v4 早期我们通过 memo 对 Table 进行了优化而随着时间推移又将一部分移除的原因（实际上，Table 仍然有一些场景会遇到这个问题需要解决）。</p><p>考虑到 Table 提供了 <code>shouldCellUpdate</code> 方法，我们准备未来调整 Table 渲染逻辑。当 Parent 节点渲染时，Table 会完整的重新渲染，而当 Table 内部更新时（例如水平滚动位置同步），则会命中缓存而跳过。</p><h3 id="最后">最后</h3><p>antd 的 Table 优化仍在进行中，我们也会持续关注 React 的新特性，以及社区的新思路。如果你有任何想法，欢迎在 GitHub 留言讨论。此外，对于自行研发组件的建议，我们推荐在每次完成优化后，都要创建对应的测试用例，并且备注来源 issue 以便于未来的回溯。以上。</p>
+</body>
+</html>

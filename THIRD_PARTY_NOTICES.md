@@ -2,10 +2,10 @@
 
 ## Tencent WeKnora
 
-The DEEP Agentic RAG progressive-search prompt, knowledge-tool descriptions,
-and ReAct stopping semantics in this repository were adapted from the design
-of Tencent WeKnora. No WeKnora runtime dependency or benchmark-specific prompt
-content is embedded in this project.
+Early Deep RAG research in this project was informed by Tencent WeKnora's
+progressive-search design and ReAct stopping semantics. The current final Deep
+pipeline is an independently implemented, bounded Goal/evidence state machine;
+there is no WeKnora runtime dependency or copied benchmark content.
 
 Copyright (C) 2025 Tencent. All rights reserved.
 
@@ -31,3 +31,12 @@ WeKnora is distributed under the MIT License:
 
 The existing model-sidecar-specific attribution remains in
 `model-sidecar/THIRD_PARTY_NOTICES.md`.
+
+## Chinese Enterprise Technical Knowledge Base v1
+
+The committed 200-document corpus contains transformed material from
+openEuler, Kubernetes, Ant Design, and Apache Doris. Those documents remain
+under their respective CC BY-SA 4.0, CC BY 4.0, MIT, and Apache-2.0 licenses.
+Selection manifests, upstream revisions, checksums, and license copies are in
+`data/chinese-enterprise-rag-v1/`. The VerityForge source license does not
+replace or narrow those upstream permissions and obligations.

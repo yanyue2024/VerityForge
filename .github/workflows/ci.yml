@@ -18,7 +18,11 @@ jobs:
           java-version: "25"
           cache: maven
       - name: Validate evaluation benchmark
-        run: ./scripts/validate-evaluation-blueprint.sh
+        run: |
+          ./scripts/validate-evaluation-blueprint.sh
+          ./scripts/validate-evaluation-blueprint.sh benchmarks/chinese-enterprise-agentic-retrieval-v1.blueprint.json
+          ./scripts/validate-evaluation-blueprint.sh benchmarks/chinese-enterprise-auto-routing-v1.blueprint.json
+          python3 scripts/build-auto-routing-benchmark.py --check
       - name: Validate observability configuration
         run: ./scripts/validate-observability.sh --static
       - name: Verify Java modules

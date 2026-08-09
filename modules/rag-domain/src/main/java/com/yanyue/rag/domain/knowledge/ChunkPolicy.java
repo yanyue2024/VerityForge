@@ -28,6 +28,6 @@ public record ChunkPolicy(
     }
 
     public static ChunkPolicy defaults() {
-        return new ChunkPolicy(1_000, 1_200, 100, 250, 384, 40, "parent-child-250-1000-v8");
+        return new ChunkPolicy(1_000, 1_200, 100, 250, 384, 40, "parent-child-250-1000-final");
     }
 }

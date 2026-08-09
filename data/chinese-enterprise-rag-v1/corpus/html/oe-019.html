@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>使用GCC编译</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">使用GCC编译</h1>
+</header>
+<h1 id="使用gcc编译">使用GCC编译</h1><p>本章介绍GCC编译的一些基本知识，并通过示例进行实际演示。更多的GCC知识请通过<strong>man gcc</strong>命令查询。</p><ul><li>使用GCC编译<ul><li>简介</li><li>基本规则<ul><li>文件类型</li><li>编译流程</li><li>编译选项</li><li>多源文件编译</li></ul></li><li>库<ul><li>动态链接库</li><li>静态链接库</li></ul></li><li>示例<ul><li>使用GCC编译C程序示例</li><li>使用GCC创建和使用动态链接库示例</li><li>使用GCC创建和使用静态链接库示例</li></ul></li></ul></li></ul><h2 id="简介">简介</h2><p>GCC（GNU Compiler Collection）是GNU推出的功能强大、性能优越的多平台编译器。GCC编译器能将C、C++语言源程序、汇编程序和目标程序编译、连接成可执行文件。openEuler操作系统中已默认安装了GCC软件包。</p><h2 id="基本规则">基本规则</h2><h3 id="文件类型">文件类型</h3><p>对于任何给定的输入文件，文件类型决定进行何种编译。GCC常用的文件类型如表1所示。</p><p><strong>表 1</strong> GCC常用的文件类型</p><p>扩展名（后缀）</p><p>说明</p><p>.c</p><p>C语言源代码文件。</p><p>.C，.cc或.cxx</p><p>C++源代码文件。</p><p>.m</p><p>Objective-C源代码文件。</p><p>.s</p><p>汇编语言源代码文件。</p><p>.i</p><p>已经预处理的C源代码文件。</p><p>.ii</p><p>已经预处理的C++源代码文件。</p><p>.S</p><p>已经预处理的汇编语言源代码文件。</p><p>.h</p><p>程序所包含的头文件。</p><p>.o</p><p>编译后的目标文件。</p><p>.so</p><p>动态链接库，它是一种特殊的目标文件。</p><p>.a</p><p>静态链接库。</p><p>.out</p><p>可执行文件，但可执行文件没有统一的后缀，系统从文件的属性来区分可执行文件和不可执行文件。如果没有给出可执行文件的名字，GCC将生成一个名为a.out的文件。</p><h3 id="编译流程">编译流程</h3><p>使用GCC将源代码文件生成可执行文件，需要经过预处理、编译、汇编和链接。</p><ol type="1"><li>预处理：将源程序（如 <strong>.c</strong> 文件）预处理，生成 <strong>.i</strong> 文件。</li><li>编译：将预处理后的 <strong>.i</strong> 文件编译成为汇编语言，生成 <strong>.s</strong> 文件。</li><li>汇编：将汇编语言文件经过汇编，生成目标文件 <strong>.o</strong> 文件。</li><li>链接：将各个模块的 <strong>.o</strong> 文件链接起来生成一个可执行程序文件。</li></ol><p>其中 <strong>.i</strong> 文件、<strong>.s</strong>文件、<strong>.o</strong>文件是中间文件或临时文件，如果使用GCC一次性完成C语言程序的编译，则这些文件会被删除。</p><h3 id="编译选项">编译选项</h3><p>GCC编译的命令格式为：<strong>gcc</strong> [<em>options</em>] [<em>filenames</em>]</p><p>其中：</p><p><em>options</em> ：编译选项。</p><p><em>filenames</em> ：文件名称。</p><p>GCC是一个功能强大的编译器，其 <em>options</em> 参数取值很多，但有些大部分并不常用，常用的 <em>options</em> 取值如表2所示。</p><p><strong>表 2</strong> GCC常用的编译选项</p><p>options取值</p><p>说明</p><p>示例</p><p>-c</p><p>编译、汇编指定的源文件生成目标文件，但不进行链接。通常用于编译不包含主程序的子程序文件。</p><p>#使用-c选项编译test1.c、test2.c源文件 gcc -c test1.c test2.c</p><p>-S</p><p>编译指定的源文件生成以.s作为后缀的汇编语言文件，但不进行汇编。</p><p>#编译器预处理 circle.c，将其翻译成汇编语言，并将结果存储在 circle.s 文件中。 gcc -S circle.c</p><p>-E</p><p>预处理指定的源文件，但不进行编译。 默认情况下，预处理器的输出会被导入到标准输出流（如显示器），可以利用-o选项把它导入到某个输出文件。</p><p>#预处理的结果导出到 circle.i 文件。 gcc -E circle.c -o circle.i</p><p>-o file</p><p>用在生成可执行文件时，生成指定的输出文件file。同时该名称不能和源文件同名。如果不给出这个选项，gcc就给出预设的可执行文件a.out。</p><p>#将源文件作为输入文件，将可执行文件作为输出文件，也即完整地编译整个程序。 gcc main.c func.c -o app.out</p><p>-g</p><p>在可执行程序中包含标准调试信息。</p><ul><li></li></ul><p>-L library_path</p><p>在库文件的搜索路径列表中添加library_path路径。</p><ul><li></li></ul><p>-Ilibrary</p><p>链接时搜索指定的函数库library。 使用 GCC 编译和链接程序时，GCC 默认会链接 libc.a 或者 libc.so，但是对于其他的库（例如非标准库、第三方库等），就需要手动添加。</p><p>#使用-l选项，以链接数学库。 gcc main.c -o main.out -lm 说明： 数学库的文件名是 libm.a。前缀lib和后缀.a是标准的，m是基本名称，GCC 会在-l选项后紧跟着的基本名称的基础上自动添加这些前缀、后缀，本例中，基本名称为 m。</p><p>-I head_path</p><p>在头文件的搜索路径列表中添加head_path路径。</p><ul><li></li></ul><p>-static</p><p>进行静态编译，及链接静态库，禁止链接动态库。</p><ul><li></li></ul><p>-shared</p><p>默认选项，可省略。 可以生成动态库文件。进行动态编译，优先链接动态库，只有没有动态库是才会链接同名的静态库。</p><ul><li></li></ul><p>-fPIC（或-fpic）</p><p>生成使用相对地址的位置无关的目标代码。通常使用-static选项从该PIC目标文件生成动态库文件。</p><ul><li></li></ul><h3 id="多源文件编译">多源文件编译</h3><p>多个源文件的编译方法有2种。</p><ul><li><p>多个源文件一起编译。编译时需要所有文件重新编译。</p><p>示例：将test1.c和tes2.c分别编译后链接成test可执行文件。</p><pre><code>$ gcc test1.c test2.c -o test</code></pre></li><li><p>分别编译各个源文件，之后对编译后输出的目标文件链接。编译时只重新编译修改的文件，未修改的文件不用重新编译。</p><p>示例：分别编译test1.c，test2.c，在将二者的目标文件test1.o，test2.o链接成test可执行文件。</p><pre><code>$ gcc -c test1.c
+$ gcc -c test2.c
+$ gcc -o test1.o test2.o -o test</code></pre></li></ul><h2 id="库">库</h2><p>库是写好的、现有的、成熟的、可以复用的代码。每个程序都要依赖很多基础的底层库。</p><p>库文件在命名时约定，以lib为前缀，以.so（动态库）或.a（静态库）为后缀，中间为库文件名。如libfoo.so或libfoo.a。由于所有的库文件都遵循了同样的规范，因此当在链接库时，-l 选项指定链接的库文件名时可以省去lib前缀，即GCC 在对-lfoo 进行处理时，会自动去链接名为libfoo.so 或libfoo.a的库文件。而当在创建库时，必须指定完整文件名libfoo.so或libfoo.a。</p><p>根据链接时期的不同，库分为静态库和动态库。静态库是在链接阶段，将汇编生成的目标文件.o与引用到的库一起链接打包到可执行文件中；而动态库是在程序编译时并不会被链接到目标代码中，而是在程序运行时才被载入。二者有如下差异。</p><ul><li><p>资源利用不一样。</p><p>静态库为生成的可执行文件的一部分，而动态库为单独的文件。所以使用静态库和和动态库的可执行文件大小和占用的磁盘空间大小不一样，导致资源利用不一样。</p></li><li><p>扩展性与兼容性不一样</p><p>静态库中某个函数的实现变了，那么可执行文件必须重新编译，而对于动态链接生成的可执行文件，只需要更新动态库本身即可，不需要重新编译可执行文件。</p></li><li><p>依赖不一样</p><p>静态库的可执行文件不需要依赖其他的内容即可运行，而动态库的可执行文件必须依赖动态库的存在。所以静态库更方便移植。</p></li><li><p>加载速度不一样</p><p>静态库在链接时就和可执行文件在一块了，而动态库在加载或者运行时才链接，因此，对于同样的程序，静态链接的要比动态链接加载更快。</p></li></ul><h3 id="动态链接库">动态链接库</h3><p>使用-shared选项 和-fPIC选项，可直接使用源文件、汇编文件或者目标文件创建一个动态库。其中-fPIC 选项作用于编译阶段，在生成目标文件时就需要使用该选项，以生成位置无关的代码。</p><p>示例1：从源文件生成动态链接库。</p><pre><code>$ gcc -fPIC -shared test.c -o libtest.so</code></pre><p>示例2：从目标文件生成动态链接库。</p><pre><code>$ gcc -fPIC -c test.c -o test.o
+$ gcc -shared test.o -o libtest.so</code></pre><p>将一个动态库链接到可执行文件，需要在命令行中列出动态库的名称。</p><p>示例：将main.c和libtest.so一起编译成 app.out，当 app.out 运行时，会动态地加载链接库 libtest.so。</p><pre><code>$ gcc main.c libtest.so -o app.out</code></pre><p>这种方式是直接指定使用当前目录下的libtest.so文件。</p><p>若使用下面搜索动态库的方式，则为了确保程序在运行时能够链接到动态库，需要通过如下三种方法中的任一种实现。</p><ul><li><p>将动态库保存在标准目录下，例如 /usr/lib。</p></li><li><p>把动态库所在路径libraryDIR增加到环境变量LD_LIBRARY_PATH中</p><p>$ export LD_LIBRARY_PATH=libraryDIR:$LD_LIBRARY_PATH</p><blockquote><p><strong>说明：</strong> LD_LIBRARY_PATH为动态库的环境变量。当运行动态库时，若动态库不在缺省文件夹（/lib 和/usr/lib）下，则需要指定环境变量LD_LIBRARY_PATH。</p></blockquote></li><li><p>把动态库所在路径libraryDIR增加 /etc/ld.so.conf中然后执行ldconfig或者以动态库所在路径libraryDIR为参数执行ldconfig。</p></li></ul><pre><code>$ gcc main.c -L libraryDIR -ltest -o app.out
+$ export LD_LIBRARY_PATH=libraryDIR:$LD_LIBRARY_PATH</code></pre><h3 id="静态链接库">静态链接库</h3><p>创建一个静态链接库，需要先将源文件编译为目标文件，然后在使用ar命令将目标文件打包成静态链接库。</p><p>示例：将源文件test1.c，test2.c，test3.c编译并打包成静态库。</p><pre><code>$ gcc -c test1.c test2.c test3.c
+$ ar rcs libtest.a test1.o test2.o test3.o</code></pre><p>其中ar是一个备份压缩命令，可以将多个文件打包成一个备份文件（也叫归档文件），也可以从备份文件中提取成员文件。ar最常见的用法是将目标文件打包为静态链接库。</p><p>ar将目标文件打包成静态链接库的命令格式为：</p><p>ar rcs <em>Sllfilename</em> <em>Targetfilelist</em></p><ul><li><em>Sllfilename</em> ：静态库文件名。</li><li><em>Targetfilelist</em> ：目标文件列表。</li><li>r： 替换库中已有的目标文件，或者加入新的目标文件。</li><li>c： 创建一个库，不管库否存在，都将创建。</li><li>s： 创建目标文件索引，在创建较大的库时能提高速度。</li></ul><p>示例：创建一个main.c文件来使用静态库</p><pre><code>$ gcc main.c -L libraryDIR -ltest -o test.out</code></pre><p>其中libraryDIR为libtest.a库的路径。</p><h2 id="示例">示例</h2><h3 id="使用gcc编译c程序示例">使用GCC编译C程序示例</h3><ol type="1"><li><p>cd到代码目录，此处以用户“~/code”进行举例。如下所示：</p><pre><code>$ cd ~/code</code></pre></li><li><p>编写Hello World程序，保存为helloworld.c，此处以编译Hello World程序进行举例说明。示例如下：</p><pre><code>$ vi helloworld.c</code></pre><p>代码内容示例：</p><pre><code>#include
+int main()
+{
+       printf(&quot;Hello World!\n&quot;);
+       return 0;
+}</code></pre></li><li><p>在代码目录，执行编译，使用命令：</p><pre><code>$ gcc helloworld.c -o helloworld</code></pre><p>编译执行未报错，表明执行通过。</p></li><li><p>编译完成后，会生成helloworld文件，查看编译结果，示例如下：</p><pre><code>$ ./helloworld
+Hello World!</code></pre></li></ol><h3 id="使用gcc创建和使用动态链接库示例">使用GCC创建和使用动态链接库示例</h3><ol type="1"><li><p>cd到代码目录，此处以用户“~/code”进行举例。并在该目录下创建src，lib，include子目录，分别用于存放源文件，动态库文件和头文件。</p><pre><code>$ cd ~/code
+$ mkdir src lib include</code></pre></li><li><p>cd到~/code/src目录，创建2个函数add.c、sub.c，分别实现加、减。</p><pre><code>$ cd ~/code/src
+$ vi add.c
+$ vi sub.c</code></pre><p>add.c代码内容示例：</p><pre><code>#include &quot;math.h&quot;
+int add(int a, int b)
+{
+        return a+b;
+}</code></pre><p>sub.c代码内容示例：</p><pre><code>#include &quot;math.h&quot;
+int sub(int a, int b)
+{
+        return a-b;
+}</code></pre></li><li><p>将add.c、sub.c源文件创建为动态库libmath.so，并将该动态库存放在~/code/lib目录。</p><pre><code>$ gcc -fPIC -shared add.c sub.c -o ~/code/lib/libmath.so</code></pre></li><li><p>cd到~/code/include目录，创建1个头文件math.h，声明函数的头文件。</p><pre><code>$ cd ~/code/include
+$ vi math.h</code></pre><p>math.h代码内容示例：</p><pre><code>#ifndef __MATH_H_
+#define __MATH_H_
+int add(int a, int b);
+int sub(int a, int b);
+#endif</code></pre></li><li><p>cd到~/code/src目录，创建一个调用add()和sub()的main.c函数。</p><pre><code>$ cd ~/code/src
+$ vi main.c</code></pre><p>math.c代码内容示例：</p><pre><code>#include
+#include &quot;math.h&quot;
+int main()
+{
+        int a, b;
+        printf(&quot;Please input a and b:\n&quot;);
+        scanf(&quot;%d %d&quot;, &amp;a, &amp;b);
+        printf(&quot;The add: %d\n&quot;, add(a,b));
+        printf(&quot;The sub: %d\n&quot;, sub(a,b));
+        return 0;
+}</code></pre></li><li><p>将main.c和libmath.so一起编译成math.out。</p><pre><code>$ gcc main.c -I ~/code/include -L ~/code/lib -lmath -o math.out</code></pre></li><li><p>将动态链接库所在的路径加入到环境变量中。</p><pre><code>$ export LD_LIBRARY_PATH=~/code/lib:$LD_LIBRARY_PATH</code></pre></li><li><p>执行math.out。</p><pre><code>$ ./math.out</code></pre><p>执行结果如下所示：</p><pre><code>Please input a and b:
+9 2
+The add: 11
+The sub: 7</code></pre></li></ol><h3 id="使用gcc创建和使用静态链接库示例">使用GCC创建和使用静态链接库示例</h3><ol type="1"><li><p>cd到代码目录，此处以用户“~/code”进行举例。并在该目录下创建src，lib，include子目录，分别用于存放源文件，静态库文件和头文件。</p><pre><code>$ cd ~/code
+$ mkdir src lib include</code></pre></li><li><p>cd到~/code/src目录，创建2个函数add.c、sub.c，分别实现加、减。</p><pre><code>$ cd ~/code/src
+$ vi add.c
+$ vi sub.c</code></pre><p>add.c代码内容示例：</p><pre><code>#include &quot;math.h&quot;
+int add(int a, int b)
+{
+        return a+b;
+}</code></pre><p>sub.c代码内容示例：</p><pre><code>#include &quot;math.h&quot;
+int sub(int a, int b)
+{
+        return a-b;
+}</code></pre></li><li><p>将add.c、sub.c源文件编译为目标文件add.o、sub.o。</p><pre><code>$ gcc -c add.c sub.c</code></pre></li><li><p>将add.o、sub.o目标文件通过ar命令打包成静态库libmath.a，并将该动态库存放在~/code/lib目录。</p><pre><code>$ ar rcs ~/code/lib/libmath.a add.o sub.o</code></pre></li><li><p>cd到~/code/include目录，创建1个头文件math.h，声明函数的头文件。</p><pre><code>$ cd ~/code/include
+$ vi math.h</code></pre><p>math.h代码内容示例：</p><pre><code>#ifndef __MATH_H_
+#define __MATH_H_
+int add(int a, int b);
+int sub(int a, int b);
+#endif</code></pre></li><li><p>cd到~/code/src目录，创建一个调用add()和sub()的main.c函数。</p><pre><code>$ cd ~/code/src
+$ vi main.c</code></pre><p>math.c代码内容示例：</p><pre><code>#include
+#include &quot;math.h&quot;
+int main()
+{
+        int a, b;
+        printf(&quot;Please input a and b:\n&quot;);
+        scanf(&quot;%d %d&quot;, &amp;a, &amp;b);
+        printf(&quot;The add: %d\n&quot;, add(a,b));
+        printf(&quot;The sub: %d\n&quot;, sub(a,b));
+        return 0;
+}</code></pre></li><li><p>将main.c和libmath.a一起编译成math.out。</p><pre><code>$ gcc main.c -I ~/code/include -L ~/code/lib -lmath -o math.out</code></pre></li><li><p>执行math.out。</p><pre><code>$ ./math.out</code></pre><p>执行结果如下所示：</p><pre><code>Please input a and b:
+9 2
+The add: 11
+The sub: 7</code></pre></li></ol>
+</body>
+</html>

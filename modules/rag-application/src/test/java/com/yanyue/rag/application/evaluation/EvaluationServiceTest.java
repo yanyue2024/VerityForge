@@ -45,7 +45,7 @@ import org.junit.jupiter.api.Test;
 
 class EvaluationServiceTest {
     @Test
-    void recognizesNormallyCompletedV4AndV5ResultsAsReusable() {
+    void recognizesHistoricalAndFinalDeepResultsAsReusable() {
         var service = new EvaluationService(
                 mock(EvaluationRepository.class), emptyRetrieval(), Runnable::run,
                 Clock.fixed(Instant.EPOCH, ZoneOffset.UTC));
@@ -88,13 +88,13 @@ class EvaluationServiceTest {
                                 "modelFailedAttemptCount", 0,
                                 "judgeCallCount", 1)),
                 null, Instant.EPOCH);
-        var successfulGoalBatchedV8 = new EvaluationResult(
+        var successfulFinalDeep = new EvaluationResult(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 Map.of(
                         "execution", "RAG",
                         "selectedMode", "DEEP",
                         "toolFailureCount", 0,
-                        "runtimeSnapshot", Map.of("pipelineVersion", "agentic-rag-v8"),
+                        "runtimeSnapshot", Map.of("pipelineVersion", "deep-rag-final"),
                         "toolDiagnostics", Map.of(
                                 "stopReason", "COMPLETED_WITH_EVIDENCE",
                                 "failedSupportActionCount", 0,
@@ -103,13 +103,13 @@ class EvaluationServiceTest {
                                 "primaryGoalCount", 3,
                                 "judgeCallCount", 3)),
                 null, Instant.EPOCH);
-        var mismatchedGoalBatchedV8 = new EvaluationResult(
+        var mismatchedFinalDeep = new EvaluationResult(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
                 Map.of(
                         "execution", "RAG",
                         "selectedMode", "DEEP",
                         "toolFailureCount", 0,
-                        "runtimeSnapshot", Map.of("pipelineVersion", "agentic-rag-v8"),
+                        "runtimeSnapshot", Map.of("pipelineVersion", "deep-rag-final"),
                         "toolDiagnostics", Map.of(
                                 "stopReason", "COMPLETED_WITH_EVIDENCE",
                                 "failedSupportActionCount", 0,
@@ -121,8 +121,8 @@ class EvaluationServiceTest {
 
         assertTrue(service.reusableRagResult(successful, "RAG"));
         assertTrue(service.reusableRagResult(successfulV5, "RAG"));
-        assertTrue(service.reusableRagResult(successfulGoalBatchedV8, "RAG"));
-        assertTrue(!service.reusableRagResult(mismatchedGoalBatchedV8, "RAG"));
+        assertTrue(service.reusableRagResult(successfulFinalDeep, "RAG"));
+        assertTrue(!service.reusableRagResult(mismatchedFinalDeep, "RAG"));
         assertTrue(!service.reusableRagResult(failedDiagnostics, "RAG"));
     }
 

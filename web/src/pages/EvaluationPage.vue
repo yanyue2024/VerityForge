@@ -68,17 +68,17 @@ const filteredDatasets = computed(() => {
 })
 
 const detailsById = computed(() => new Map((completedRunDetailsQuery.data.value ?? []).map((detail) => [detail.run.id, detail])))
-const v8Runs = computed(() => {
+const fullAnswerRuns = computed(() => {
   const runs = (runsQuery.data.value ?? []).filter((run) => run.datasetName.includes('三策略'))
   return runs
     .map((run) => detailsById.value.get(run.id))
     .filter((detail): detail is EvaluationRunDetail => Boolean(detail))
     .sort((a, b) => String(a.requestSnapshot.mode).localeCompare(String(b.requestSnapshot.mode)))
 })
-const v8Dataset = computed(() => datasetsQuery.data.value?.find((dataset) => dataset.name.includes('三策略')))
-const v8Fast = computed(() => v8Runs.value.find((detail) => String(detail.requestSnapshot.mode) === 'FAST'))
-const v8Deep = computed(() => v8Runs.value.find((detail) => String(detail.requestSnapshot.mode) === 'DEEP'))
-const v8Ready = computed(() => Boolean(v8Fast.value && v8Deep.value))
+const fullAnswerDataset = computed(() => datasetsQuery.data.value?.find((dataset) => dataset.name.includes('三策略')))
+const fullAnswerFast = computed(() => fullAnswerRuns.value.find((detail) => String(detail.requestSnapshot.mode) === 'FAST'))
+const fullAnswerDeep = computed(() => fullAnswerRuns.value.find((detail) => String(detail.requestSnapshot.mode) === 'DEEP'))
+const fullAnswerReady = computed(() => Boolean(fullAnswerFast.value && fullAnswerDeep.value))
 
 const totals = computed(() => ({
   all: runsQuery.data.value?.length ?? 0,
@@ -142,10 +142,10 @@ function modeIcon(mode: string) { return mode === 'DEEP' ? Network : Zap }
       <RouterLink to="/evaluation/new" class="button-primary"><Plus :size="17" aria-hidden="true" />新建评测</RouterLink>
     </header>
 
-    <section v-if="v8Ready" class="evaluation-hero mt-8 overflow-hidden rounded-xl border border-brand-100 bg-white">
+    <section v-if="fullAnswerReady" class="evaluation-hero mt-8 overflow-hidden rounded-xl border border-brand-100 bg-white">
       <div class="flex items-start justify-between gap-8 border-b border-paper-200 px-7 py-6">
         <div>
-          <div class="flex items-center gap-3"><span class="benchmark-stamp">V8 FINAL</span><span class="text-xs font-medium text-ink-400">已导入 · {{ v8Dataset?.caseCount ?? 5 }} 个样例</span></div>
+          <div class="flex items-center gap-3"><span class="benchmark-stamp">完整链路</span><span class="text-xs font-medium text-ink-400">已导入 · {{ fullAnswerDataset?.caseCount ?? 5 }} 个样例</span></div>
           <h2 class="mt-3 text-xl font-semibold text-ink-950">Fast / Deep 完整链路对照</h2>
           <p class="mt-1 text-sm text-ink-500">同一数据集、同一知识范围、同一模型配置；蓝色强调质量，墨色强调成本。</p>
         </div>
@@ -155,11 +155,11 @@ function modeIcon(mode: string) { return mode === 'DEEP' ? Network : Zap }
       <div class="divide-y divide-paper-100 px-7">
         <div v-for="row in comparisonRows" :key="row.key" class="grid min-h-[68px] grid-cols-[minmax(0,1fr)_160px_160px] items-center gap-6">
           <div><p class="text-sm font-semibold text-ink-900">{{ row.label }}</p><p class="mt-1 text-xs text-ink-400">{{ row.note }}</p></div>
-          <div class="text-right"><p class="text-sm font-semibold tabular-nums text-ink-700">{{ display(v8Fast, row) }}</p><div class="metric-track ml-auto mt-2"><span class="bg-ink-300" :style="{ width: `${barValue(v8Fast, row)}%` }" /></div></div>
-          <div class="text-right"><p class="text-sm font-semibold tabular-nums text-brand-700">{{ display(v8Deep, row) }}</p><div class="metric-track ml-auto mt-2"><span class="bg-brand-600" :style="{ width: `${barValue(v8Deep, row)}%` }" /></div></div>
+          <div class="text-right"><p class="text-sm font-semibold tabular-nums text-ink-700">{{ display(fullAnswerFast, row) }}</p><div class="metric-track ml-auto mt-2"><span class="bg-ink-300" :style="{ width: `${barValue(fullAnswerFast, row)}%` }" /></div></div>
+          <div class="text-right"><p class="text-sm font-semibold tabular-nums text-brand-700">{{ display(fullAnswerDeep, row) }}</p><div class="metric-track ml-auto mt-2"><span class="bg-brand-600" :style="{ width: `${barValue(fullAnswerDeep, row)}%` }" /></div></div>
         </div>
       </div>
-      <div class="flex items-center justify-between gap-5 px-7 py-5"><div class="flex items-center gap-5 text-xs text-ink-500"><span class="inline-flex items-center gap-1.5"><CheckCircle2 :size="15" class="text-evidence-600" />两条链路均完成</span><span class="inline-flex items-center gap-1.5"><Gauge :size="15" class="text-brand-600" />Deep 质量优先</span><span class="inline-flex items-center gap-1.5"><Clock3 :size="15" class="text-ink-400" />Fast 更快</span></div><div class="flex items-center gap-2"><RouterLink v-if="v8Fast" :to="`/evaluation/runs/${v8Fast.run.id}`" class="button-secondary">查看 Fast</RouterLink><RouterLink v-if="v8Deep" :to="`/evaluation/runs/${v8Deep.run.id}`" class="button-primary">查看 Deep<ArrowRight :size="16" /></RouterLink></div></div>
+      <div class="flex items-center justify-between gap-5 px-7 py-5"><div class="flex items-center gap-5 text-xs text-ink-500"><span class="inline-flex items-center gap-1.5"><CheckCircle2 :size="15" class="text-evidence-600" />两条链路均完成</span><span class="inline-flex items-center gap-1.5"><Gauge :size="15" class="text-brand-600" />Deep 质量优先</span><span class="inline-flex items-center gap-1.5"><Clock3 :size="15" class="text-ink-400" />Fast 更快</span></div><div class="flex items-center gap-2"><RouterLink v-if="fullAnswerFast" :to="`/evaluation/runs/${fullAnswerFast.run.id}`" class="button-secondary">查看 Fast</RouterLink><RouterLink v-if="fullAnswerDeep" :to="`/evaluation/runs/${fullAnswerDeep.run.id}`" class="button-primary">查看 Deep<ArrowRight :size="16" /></RouterLink></div></div>
     </section>
     <section v-else-if="completedRunDetailsQuery.isFetching.value" class="evaluation-hero mt-8 h-[360px] animate-pulse rounded-xl border border-paper-200 bg-white" />
 
@@ -191,7 +191,7 @@ function modeIcon(mode: string) { return mode === 'DEEP' ? Network : Zap }
       <div v-if="datasetsQuery.isPending.value" class="divide-y divide-paper-200"><div v-for="item in 4" :key="item" class="h-20 animate-pulse bg-paper-100" /></div>
       <ErrorState v-else-if="datasetsQuery.isError.value" class="mt-7" :message="readableError(datasetsQuery.error.value)" @retry="datasetsQuery.refetch()" />
       <EmptyState v-else-if="!filteredDatasets.length" class="mt-10" :icon="Files" :title="search ? '没有符合条件的数据集' : '还没有评测数据集'" :description="search ? '调整搜索内容。' : '新建评测时上传 Query XLSX。'" />
-      <div v-else class="evaluation-run-table"><div class="grid grid-cols-[minmax(360px,1fr)_120px_120px_140px_160px_32px] gap-5 border-b border-paper-200 px-3 py-3 text-xs font-medium text-ink-400"><span>数据集</span><span>问题</span><span>历史任务</span><span>最近状态</span><span>创建时间</span><span /></div><RouterLink v-for="dataset in filteredDatasets" :key="dataset.id" :to="`/evaluation/datasets/${dataset.id}`" class="group grid min-h-[82px] grid-cols-[minmax(360px,1fr)_120px_120px_140px_160px_32px] items-center gap-5 border-b border-paper-200 px-3 transition-colors hover:bg-white"><div class="min-w-0"><div class="flex items-center gap-2"><p class="truncate text-sm font-semibold text-ink-950 group-hover:text-brand-700">{{ dataset.name }}</p><span v-if="dataset.name.includes('三策略')" class="benchmark-stamp">V8 FINAL</span></div><p class="mt-1 truncate text-xs text-ink-400">{{ dataset.description || '未填写说明' }}</p></div><span class="text-sm font-semibold tabular-nums text-ink-800">{{ dataset.caseCount }}</span><span class="text-sm tabular-nums text-ink-600">{{ dataset.runCount }}</span><StatusPill v-if="dataset.lastRunStatus" :status="dataset.lastRunStatus" /><span v-else class="text-xs text-ink-400">尚未运行</span><span class="text-xs text-ink-500">{{ formatDate(dataset.createdAt) }}</span><ArrowRight :size="17" class="text-ink-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-700" aria-hidden="true" /></RouterLink></div>
+      <div v-else class="evaluation-run-table"><div class="grid grid-cols-[minmax(360px,1fr)_120px_120px_140px_160px_32px] gap-5 border-b border-paper-200 px-3 py-3 text-xs font-medium text-ink-400"><span>数据集</span><span>问题</span><span>历史任务</span><span>最近状态</span><span>创建时间</span><span /></div><RouterLink v-for="dataset in filteredDatasets" :key="dataset.id" :to="`/evaluation/datasets/${dataset.id}`" class="group grid min-h-[82px] grid-cols-[minmax(360px,1fr)_120px_120px_140px_160px_32px] items-center gap-5 border-b border-paper-200 px-3 transition-colors hover:bg-white"><div class="min-w-0"><div class="flex items-center gap-2"><p class="truncate text-sm font-semibold text-ink-950 group-hover:text-brand-700">{{ dataset.name }}</p><span v-if="dataset.name.includes('三策略')" class="benchmark-stamp">完整链路</span></div><p class="mt-1 truncate text-xs text-ink-400">{{ dataset.description || '未填写说明' }}</p></div><span class="text-sm font-semibold tabular-nums text-ink-800">{{ dataset.caseCount }}</span><span class="text-sm tabular-nums text-ink-600">{{ dataset.runCount }}</span><StatusPill v-if="dataset.lastRunStatus" :status="dataset.lastRunStatus" /><span v-else class="text-xs text-ink-400">尚未运行</span><span class="text-xs text-ink-500">{{ formatDate(dataset.createdAt) }}</span><ArrowRight :size="17" class="text-ink-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-700" aria-hidden="true" /></RouterLink></div>
     </template>
   </div>
 </template>

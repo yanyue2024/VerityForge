@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>搭建数据库服务器</title>
+  
+  <!--[if lt IE 9]>
+    
+  <![endif]-->
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">搭建数据库服务器</h1>
+</header>
+<h1 id="搭建数据库服务器">搭建数据库服务器</h1><ul><li>搭建数据库服务器<ul><li>PostgreSql服务器<ul><li>软件介绍</li><li>配置环境</li><li>安装、运行和卸载</li><li>管理数据库角色</li><li>管理数据库</li></ul></li><li>Mariadb服务器<ul><li>软件介绍</li><li>配置环境</li><li>安装、运行和卸载</li><li>管理数据库用户</li><li>管理数据库</li></ul></li><li>MySQL服务器<ul><li>软件介绍</li><li>配置环境</li><li>安装、运行和卸载</li><li>管理数据库用户</li><li>管理数据库</li></ul></li></ul></li></ul><h2 id="postgresql服务器">PostgreSql服务器</h2><h3 id="软件介绍">软件介绍</h3><p>PostgreSQL的架构如图1所示，主要进程说明如表1所示。</p><p><strong>图 1</strong> PostgreSql架构</p><p><strong>表 1</strong> PostgreSql中的主要进程说明</p><p>进程类别</p><p>进程名称</p><p>说明</p><p>主进程</p><p>Postmaster</p><p>Postmaster是整个数据库实例的总控进程，负责启动和关闭该数据库实例。</p><p>常驻进程</p><p>Postgres（常驻进程）</p><p>管理后端的常驻进程，也称为“postmaster”。其默认侦听UNIXDomain Socket和TCP/IP（Windows等，一部分的平台只侦听TCP/IP）的5432端口，等待来自前端的的连接处理。侦听的端口号可以在PostgreSql的设置文件postgresql.conf中修改。</p><p>子进程</p><p>Postgres（子进程）</p><p>子进程根据pg_hba.conf定义的安全策略来判断是否允许进行连接，根据策略，会拒绝某些特定的IP及网络，或者也可以只允许某些特定的用户或者对某些数据库进行连接。 Postgres会接受前端过来的查询，然后对数据库进行检索，最后把结果返回，有时也会对数据库进行更新。更新的数据同时还会记录在事务日志里面（PostgreSQL称为WAL日志）。这个主要是当停电、服务器宕机、重新启动的时候进行恢复处理的时候使用。另外，把日志归档保存起来，可在需要进行恢复的时候使用。在PostgreSQL 9.0以后，通过把WAL日志传送其他的postgreSQL，可以实时的进行数据库复制，这就是所谓的“数据库复制”功能。</p><p>辅助进程</p><p>SysLogger（系统日志）</p><p>需要在Postgres.conf中logging_collection设置为on，此时主进程才会启动Syslogger辅助进程。</p><p>BgWriter（后台写）</p><p>把共享内存中的脏页写到磁盘上的进程。主要是为了提高插入、更新和删除数据的性能。</p><p>WALWriter（预写式日志）</p><p>在修改数据之前把修改操作记录到磁盘中，以便后面更新实时数据时就不需要数据持久化到文件中。</p><p>PgArch（归档）</p><p>WAL日志会被循环使用，PgArch在归档前会把WAL日志备份出来。通过PITY（Point in Time Recovery）技术，可以对数据库进行一次全量备份后，该技术将备份时间点之后的WAL日志通过归档进行备份，使用数据库的全量备份再加上后面产生的WAL日志，即可把数据库向前推到全量备份后的任意一个时间点。</p><p>AutoVacuum（系统自动清理）</p><p>在PostgreSQL数据库中，对表进行DELETE操作后，旧的数据并不会立即被删除，并且，在更新数据时，也并不会在旧的数据上做更新，而是新生成一行数据。旧的数据只是被标识为删除状态，只有在没有并发的其他事务读到这些就数据时，它们才会被清除。这个清除工作就由AutoVacuum进程完成。</p><p>PgStat（统计收集）</p><p>做数据的统计收集工作。主要用于查询优化时的代价估算，包括一个表和索引进行了多少次的插入、更新、删除操作，磁盘块读写的次数、行的读次数。pg_statistic中存储了PgStat收集的各类信息。</p><p>CheckPoint（检查点）</p><p>检查点是系统设置的事务序列点，设置检查点保证检查点前的日志信息刷到磁盘中。</p><h3 id="配置环境">配置环境</h3><blockquote><p><strong>说明：</strong> 以下环境配置仅为参考示例，具体配置视实际需求做配置</p></blockquote><h4 id="关闭防火墙并取消开机自启动">关闭防火墙并取消开机自启动</h4><blockquote><p><strong>说明：</strong> 测试环境下通常会关闭防火墙以避免部分网络因素影响，视实际需求做配置。</p></blockquote><ol type="1"><li><p>在root权限下停止防火墙。</p><pre><code># systemctl stop firewalld</code></pre></li><li><p>在root权限下关闭防火墙。</p><pre><code># systemctl disable firewalld</code></pre><blockquote><p><strong>说明：</strong> 执行disable命令关闭防火墙的同时，也取消了开机自启动。</p></blockquote></li></ol><h4 id="修改selinux为disabled">修改SELINUX为disabled</h4><ol type="1"><li><p>在root权限下修改配置文件。</p><pre><code># sed -i &#39;s/SELINUX=enforcing/SELINUX=disabled/g&#39; /etc/sysconfig/selinux</code></pre></li></ol><h4 id="创建组和用户">创建组和用户</h4><blockquote><p><strong>说明：</strong> 服务器环境下，为了系统安全，通常会为进程分配单独的用户，以实现权限隔离。本章节创建的组和用户都是操作系统层面的，不是数据库层面的。</p></blockquote><ol type="1"><li><p>在root权限下创建PostgreSQL用户（组）。</p><pre><code># groupadd  postgres</code></pre><pre><code># useradd  -g postgres postgres</code></pre></li><li><p>在root权限下设置postgres用户密码（重复输入密码）。</p><pre><code># passwd postgres</code></pre></li></ol><h4 id="搭建数据盘">搭建数据盘</h4><blockquote><p><strong>说明：</strong></p><ul><li>测试极限性能时，建议单独挂载IO性能更优的NVME SSD存储介质创建PostgreSQL测试实例，避免磁盘IO对性能测试结果的影响，本文以单独挂载NVME SSD为例，参考步骤1~步骤4。</li><li>非性能测试时，在root权限下执行以下命令，创建数据目录即可。然后跳过本小节： # mkdir /data</li></ul></blockquote><ol type="1"><li><p>在root权限下创建文件系统（以xfs为例，根据实际需求创建文件系统），若磁盘之前已做过文件系统，执行此命令会出现报错，可使用-f参数强制创建文件系统。</p><pre><code># mkfs.xfs /dev/nvme0n1</code></pre></li><li><p>在root权限下创建数据目录。</p><pre><code># mkdir /data</code></pre></li><li><p>在root权限下挂载磁盘。</p><pre><code># mount -o noatime,nobarrier /dev/nvme0n1 /data</code></pre></li></ol><h4 id="数据目录授权">数据目录授权</h4><ol type="1"><li><p>在root权限下修改目录权限。</p><pre><code># chown -R postgres:postgres /data/</code></pre></li></ol><h3 id="安装运行和卸载">安装、运行和卸载</h3><h4 id="安装">安装</h4><ol type="1"><li><p>配置本地yum源，详细信息请参考搭建repo服务器。</p></li><li><p>清除缓存。</p><pre><code>$ dnf clean all</code></pre></li><li><p>创建缓存。</p><pre><code>$ dnf makecache</code></pre></li><li><p>在root权限下安装PostgreSQL服务器。</p><pre><code># dnf install postgresql-server</code></pre></li><li><p>查看安装后的rpm包。</p><pre><code>$ rpm -qa | grep postgresql</code></pre></li></ol><h4 id="运行">运行</h4><h5 id="初始化数据库">初始化数据库</h5><blockquote><p><strong>须知：</strong> 此步骤在postgres用户下操作。</p></blockquote><ol type="1"><li><p>切换到已创建的PostgreSQL用户。</p><pre><code># su - postgres</code></pre></li><li><p>初始化数据库，其中命令中的/usr/bin是命令initdb所在的目录。</p><pre><code>$ /usr/bin/initdb -D /data/</code></pre></li></ol><h5 id="启动数据库">启动数据库</h5><ol type="1"><li><p>启动PostgreSQL数据库。</p><pre><code>$ /usr/bin/pg_ctl -D /data/ -l /data/logfile start</code></pre></li><li><p>确认PostgreSQL数据库进程是否正常启动。</p><pre><code>$ ps -ef | grep postgres</code></pre><p>命令执行后，打印信息如下图所示，PostgreSQL相关进程已经正常启动了。</p></li></ol><h5 id="登录数据库">登录数据库</h5><ol type="1"><li><p>登录数据库。</p><pre><code>$ /usr/bin/psql -U postgres</code></pre><blockquote><p><strong>说明：</strong> 初次登录数据库，无需密码。</p></blockquote></li></ol><h5 id="配置数据库账号密码">配置数据库账号密码</h5><ol type="1"><li><p>登录后，设置postgres密码。</p><pre><code>postgres=#alter user postgres with password &#39;123456&#39;;</code></pre></li></ol><h5 id="退出数据库">退出数据库</h5><ol type="1"><li><p>执行\q退出数据库。</p><pre><code>postgres=#\q</code></pre></li></ol><h5 id="停止数据库">停止数据库</h5><ol type="1"><li><p>停止PostgreSQL数据库。</p><pre><code>$ /usr/bin/pg_ctl -D /data/ -l /data/logfile stop</code></pre></li></ol><h4 id="卸载">卸载</h4><ol type="1"><li><p>在postgres用户下停止数据库。</p><pre><code>$ /usr/bin/pg_ctl -D /data/ -l /data/logfile stop</code></pre></li><li><p>在root用户下执行<strong>dnf remove postgresql-server</strong>卸载PostgreSQL数据库。</p><pre><code># dnf remove postgresql-server</code></pre></li></ol><h3 id="管理数据库角色">管理数据库角色</h3><h4 id="创建角色">创建角色</h4><p>可以使用CREATE ROLE语句或createuser来创建角色。createuser是对CREATE ROLE命令的封装，需要在shell界面执行，而不是在数据库界面。</p><pre><code>CREATE ROLE rolename [ [ WITH ] option [ ... ] ];</code></pre><pre><code>createuser rolename</code></pre><p>其中：</p><ul><li>rolename：角色名。</li><li>option为参数选项，常用的有：<ul><li>SUPERUSER | NOSUPERUSER：决定一个新角色是否为"超级用户"，若未指定，则默认为NOSUPERUSER，即不是超级用户。</li><li>CREATEDB | NOCREATEDB：定义一个角色是否能创建数据库，若未指定，则默认为NOCREATEDB，即不能创建数据库。</li><li>CREATEROLE | NOCREATEROLE：决定一个角色是否可以创建新角色，若未指定，则默认为NOCREATEROLE，即不能创建新角色。</li><li>INHERIT | NOINHERIT：决定一个角色是否"继承"它所在组的角色的权限。一个带有 INHERIT 属性的角色可以自动使用已经赋与它直接或间接所在组的任何权限。若未指定，则默认为INHERIT。</li><li>LOGIN | NOLOGIN：决定一个角色是否可以登录，一个拥有LOGIN属性的角色可以认为是一个用户，若无此属性的角色可以用于管理数据库权限，但是并不是用户，若未指定，则默认为NOLOGIN。但若创建角色是使用的是CREATE USER而不是CREATE ROLE，则默认是LOGIN属性。</li><li>[ ENCRYPTED | UNENCRYPTED ] PASSWORD 'password'：设置角色的密码，密码只对那些拥有 LOGIN 属性的角色有意义。ENCRYPTED | UNENCRYPTED表示是否对密码进行加密，若未指定，则默认为ENCRYPTED，即加密。</li><li>VALID UNTIL 'timestamp'：角色的密码失效的时间戳，若为指定，则表示密码永久有效。</li><li>IN ROLE rolename1：列出一个或多个现有的角色，新角色rolename将立即加入这些角色，成为rolename1的成员。</li><li>ROLE rolename2：列出一个或多个现有的角色，它们将自动添加为新角色rolename的成员，即新角色为"组"。</li></ul></li></ul><p>要使用这条命令，必须拥有 CREATEROLE 权限或者是数据库超级用户。</p><h5 id="示例">示例</h5><p>#创建一个可以登录的角色roleexample1。</p><pre><code>postgres=# CREATE ROLE roleexample1 LOGIN;</code></pre><p>#创建一个密码为123456的角色roleexample2。</p><pre><code>postgres=# CREATE ROLE roleexample2 WITH LOGIN PASSWORD &#39;123456&#39;;</code></pre><p>#创建角色名为roleexample3的角色。。</p><pre><code>[postgres@localhost ~]$ createuser roleexample3</code></pre><h4 id="查看角色">查看角色</h4><p>可以使用SELECT语句或psql的元命令\du查看角色。</p><pre><code>SELECT rolename FROM pg_roles;</code></pre><pre><code>\du</code></pre><p>其中：rolename：角色名。</p><h5 id="示例-1">示例</h5><p>#查看roleexample1角色。</p><pre><code>postgres=# SELECT roleexample1 from pg_roles;</code></pre><p>#查看现有角色。</p><pre><code>postgres=# \du</code></pre><h4 id="修改角色">修改角色</h4><h5 id="修改用户名">修改用户名</h5><p>可以使用ALTER ROLE语句修改一个已经存在的角色名。</p><pre><code>ALTER ROLE oldrolername RENAME TO newrolename;</code></pre><p>其中：</p><ul><li>oldrolername：旧的角色名。</li><li>newrolename：新的角色名。</li></ul><h5 id="修改用户示例">修改用户示例</h5><p>#将角色名roleexample1修改为roleexapme2。</p><pre><code>postgres=# ALTER ROLE roleexample1 RENAME TO roleexample2;</code></pre><h5 id="修改用户密码">修改用户密码</h5><p>可以使用ALTER ROLE语句修改一个角色的登录密码。</p><pre><code>ALTER ROLE rolename PASSWORD &#39;password&#39;</code></pre><p>其中：</p><ul><li>rolename：角色名。</li><li>password：密码。</li></ul><h5 id="修改角色密码示例">修改角色密码示例</h5><p>#将roleexample1的密码修改为456789。</p><pre><code>postgres=# ALTER ROLE roleexample1 WITH PASSWORD &#39;456789&#39;;</code></pre><h4 id="删除角色">删除角色</h4><p>可以使用DROP ROLE语句或dropuser来删除角色。dropuser是对DROP ROLE命令的封装，需要在shell界面执行，而不是在数据库界面。</p><pre><code>DROP ROLE rolename;</code></pre><pre><code>dropuser rolename</code></pre><p>其中：rolename：角色名。</p><h5 id="示例-2">示例</h5><p>#删除userexample1角色。</p><pre><code>postgres=# DROP ROLE userexample1;</code></pre><p>#删除userexample2角色。。</p><pre><code>[postgres@localhost ~]$ dropuser userexample2</code></pre><h4 id="角色授权">角色授权</h4><p>可以使用GRANT语句来对角色授权。</p><p>对角色授予表的操作权限：</p><pre><code>GRANT { { SELECT | INSERT | UPDATE | DELETE | REFERENCES | TRIGGER } [,...] | ALL [ PRIVILEGES ] } ON [ TABLE ] tablename [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予序列的操作权限：</p><pre><code>GRANT { { USAGE | SELECT | UPDATE } [,...] | ALL [ PRIVILEGES ] } ON SEQUENCE sequencename [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予数据库的操作权限：</p><pre><code>GRANT { { CREATE | CONNECT | TEMPORARY | TEMP } [,...] | ALL [ PRIVILEGES ] } ON DATABASE databasename [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予函数的操作权限：</p><pre><code>GRANT { EXECUTE | ALL [ PRIVILEGES ] } ON FUNCTION funcname ( [ [ argmode ] [ argname ] argtype [, ...] ] ) [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予过程语言的操作权限：</p><pre><code>GRANT { USAGE | ALL [ PRIVILEGES ] } ON LANGUAGE langname [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予模式的操作权限：</p><pre><code>GRANT { { CREATE | USAGE } [,...] | ALL [ PRIVILEGES ] } ON SCHEMA schemaname [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>对角色授予表空间的操作权限：</p><pre><code>GRANT { CREATE | ALL [ PRIVILEGES ] } ON TABLESPACE tablespacename [, ...] TO { rolename | GROUP groupname | PUBLIC } [, ...] [ WITH GRANT OPTION ]</code></pre><p>将角色rolename1的成员关系赋予角色rolename2：</p><pre><code>GRANT rolename1 [, ...] TO rolename2 [, ...] [ WITH ADMIN OPTION ]</code></pre><p>其中：</p><ul><li>SELECT、INSERT、UPDATE、DELETE、REFERENCES、TRIGGER、USAGE、CREATE、CONNECT、TEMPORARY、TEMP、EXECUTE、ALL [ PRIVILEGES ]：用户的操作权限，ALL [ PRIVILEGES ]表示所有的权限，PRIVILEGES关键字在 PostgreSQL里是可选的，但是严格的SQL 要求有这个关键字。</li><li>ON字句：用于指定权限授予的对象。</li><li>tablename：表名。</li><li>TO字句：用来指定被赋予权限的角色。</li><li>rolename、rolename1、rolename2：角色名。</li><li>groupname：角色组名。</li><li>PUBLIC：表示该权限要赋予所有角色，包括那些以后可能创建的用户。</li><li>WITH GRANT OPTION：表示权限的接收者也可以将此权限赋予他人，否则就不能授权他人。该选项不能赋予给PUBLIC。</li><li>sequencename：序列名。</li><li>databasename：数据库名。</li><li>funcname ( [ [ argmode ] [ argname ] argtype [, ...] ] )：函数名及其参数。</li><li>langname：过程语言名。</li><li>schemaname：模式名。</li><li>tablespacename：表空间名。</li><li>WITH ADMIN OPTION：表示成员随后就可以将角色的成员关系赋予其它角色，以及撤销其它角色的成员关系。</li></ul><h5 id="示例-3">示例</h5><p>#对userexample授予数据库database1的CREATE权限。</p><pre><code>postgres=# GRANT CREATE ON DATABASE database1 TO userexample;</code></pre><p>#对所有用户授予表table1的所有权限。</p><pre><code>postgres=# GRANT ALL PRIVILEGES ON TABLE table1 TO PUBLIC;</code></pre><h4 id="删除用户权限">删除用户权限</h4><p>可以使用REVOKE语句来撤销以前赋予一个或多个角色的权限。</p><p>撤销角色对表的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { { SELECT | INSERT | UPDATE | DELETE | REFERENCES | TRIGGER } [,...] | ALL [ PRIVILEGES ] } ON [ TABLE ] tablename [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...]</code></pre><p>撤销角色对序列的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { { USAGE | SELECT | UPDATE } [,...] | ALL [ PRIVILEGES ] } ON SEQUENCE sequencename [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>撤销角色对数据库的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { { CREATE | CONNECT | TEMPORARY | TEMP } [,...] | ALL [ PRIVILEGES ] } ON DATABASE databasename [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>撤销角色对函数的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { EXECUTE | ALL [ PRIVILEGES ] } ON FUNCTION funcname ( [ [ argmode ] [ argname ] argtype [, ...] ] ) [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>撤销角色对过程语言的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { USAGE | ALL [ PRIVILEGES ] } ON LANGUAGE langname [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>撤销角色对模式的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { { CREATE | USAGE } [,...] | ALL [ PRIVILEGES ] } ON SCHEMA schemaname [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>撤销角色对表空间的操作权限：</p><pre><code>REVOKE [ GRANT OPTION FOR ] { CREATE | ALL [ PRIVILEGES ] } ON TABLESPACE tablespacename [, ...] FROM { rolename | GROUP groupname | PUBLIC } [, ...] [ CASCADE | RESTRICT ]</code></pre><p>删除rolename2的rolename1的成员关系：</p><pre><code>REVOKE [ ADMIN OPTION FOR ] rolename1 [, ...] FROM rolename2 [, ...] [ CASCADE | RESTRICT ]</code></pre><p>其中：</p><ul><li>GRANT OPTION FOR：表示只是撤销对该权限的授权的权力，而不是撤销该权限本身。</li><li>SELECT、INSERT、UPDATE、DELETE、REFERENCES、TRIGGER、USAGE、CREATE、CONNECT、TEMPORARY、TEMP、EXECUTE、ALL [ PRIVILEGES ]：用户的操作权限，ALL [ PRIVILEGES ]表示所有的权限，PRIVILEGES关键字在 PostgreSQL里是可选的，但是严格的SQL 要求有这个关键字。</li><li>ON字句：用于指定撤销权限的对象。</li><li>tablename：表名。</li><li>FROM字句：用来指定被撤销权限的角色。</li><li>rolename、rolename1、rolename2：角色名。</li><li>groupname：角色组名。</li><li>PUBLIC：表示撤销隐含定义的、拥有所有角色的组，但并不意味着所有角色都失去了权限，那些直接得到的权限以及通过一个组得到的权限仍然有效。</li><li>sequencename：序列名。</li><li>CASCADE：撤销所有依赖性权限。</li><li>RESTRICT：不撤销所有依赖性权限。</li><li>databasename：数据库名。</li><li>funcname ( [ [ argmode ] [ argname ] argtype [, ...] ] )：函数名及其参数。</li><li>langname：过程语言名。</li><li>schemaname：模式名。</li><li>tablespacename：表空间名。</li><li>ADMIN OPTION FOR：表示传递的授权不会自动收回。</li></ul><h5 id="示例-4">示例</h5><p>#对userexample授予数据库database1的CREATE权限。</p><pre><code>postgres=# GRANT CREATE ON DATABASE database1 TO userexample;</code></pre><p>#对所有用户授予表table1的所有权限。</p><pre><code>postgres=# GRANT ALL PRIVILEGES ON TABLE table1 TO PUBLIC;</code></pre><h3 id="管理数据库">管理数据库</h3><h4 id="创建数据库">创建数据库</h4><p>可以使用CREATE DATABASE语句或createdb来创建角色。createrdb是对CREATE DATABASE命令的封装，需要在shell界面执行，而不是在数据库界面。</p><pre><code>CREATE DATABASE databasename;</code></pre><pre><code>createdb databasename</code></pre><p>其中：databasename为数据库名。</p><p>要使用这条命令，必须拥有CREATEDB权限。</p><h5 id="示例-5">示例</h5><p>#创建一个数据库database1。</p><pre><code>postgres=# CREATE DATABASE database1;</code></pre><h4 id="选择数据库">选择数据库</h4><p>可以使用\c语句来选择数据库。</p><pre><code>\c databasename;</code></pre><p>其中：databasename为数据库名称。</p><h5 id="示例-6">示例</h5><p>#选择databaseexample数据库。</p><pre><code>postgres=# \c databaseexample;</code></pre><h4 id="查看数据库">查看数据库</h4><p>可以使用\l语句来查看数据库。</p><pre><code>\l;</code></pre><h5 id="示例-7">示例</h5><p>#查看所有数据库。</p><pre><code>postgres=# \l;</code></pre><h4 id="删除数据库">删除数据库</h4><p>可以使用DROP DATABASE语句或dropdb来删除数据库。dropdb是对DROP DATABASE命令的封装，需要在shell界面执行，而不是在数据库界面。</p><blockquote><p><strong>注意：</strong> 删除数据库要谨慎操作，一旦删除，数据库中的所有表和数据都会删除。</p></blockquote><pre><code>DROP DATABASE databasename;</code></pre><pre><code>dropdb databasename</code></pre><p>其中：databasename为数据库名称。</p><p>DROP DATABASE会删除数据库的系统目录项并且删除包含数据的文件目录。</p><p>DROP DATABASE只能由超级管理员或数据库拥有者执行。</p><h5 id="示例-8">示例</h5><p>#删除databaseexample数据库。</p><pre><code>postgres=# DROP DATABASE databaseexample;</code></pre><h4 id="备份数据库">备份数据库</h4><p>可以使用pg_dump命令备份数据库，将数据库转储到一个脚本文件或其他归档文件中。</p><pre><code>pg_dump [option]... [databasename] &gt; outfile</code></pre><p>其中：</p><ul><li>databasename：数据库名称。如果没有声明这个参数，那么使用环境变量 PGDATABASE 。如果那个环境变量也没声明，那么使用发起连接的用户名。</li><li>outfile：数据库备份的文件。</li><li>option：pg_dump命令参数选项，多个参数之间可以使用空格分隔。常用的pg_dump命令参数选项如下：<ul><li>-f，--file= <em>filename</em> ：指输出到指定的文件。如果忽略，则使用标准输出。</li><li>-d，--dbname= <em>databasename</em> ：指定转储的数据库。</li><li>-h，--host= <em>hostname</em> ：指定主机名。</li><li>-p，--port= <em>portnumber</em> ：指定端口。</li><li>-U，--username= <em>username</em> ：指定连接的用户名。</li><li>-W，--password：强制口令提示（自动）。</li></ul></li></ul><h5 id="示例-9">示例</h5><p>#备份主机为192.168.202.144，端口为3306，postgres用户下的database1数据库到db1.sql中。</p><pre><code>[postgres@localhost ~]$ pg_dump -h 192.168.202.144 -p 3306 -U postgres -W database1 &gt; db1.sql</code></pre><h4 id="恢复数据库">恢复数据库</h4><p>可以使用psql命令恢复数据库。</p><pre><code>psql [option]... [databasename [username]]
+
+当Mariadb接受到Sql语句时，其详细的执行过程如下：
+
+1.  当客户端连接到mariadb的时候，会认证客户端的主机名、用户、密码，认证功能可以做成插件。
+2.  如果登录成功，客户端发送sql命令到服务端。由解析器解析sql语句。
+3.  服务端检查客户端是否有权限去获取它想要的资源。
+4.  如果查询已经存储在query cache当中，那么结果立即返回。
+5.  优化器将会找出最快的执行策略，或者是执行计划，也就是说优化器可以决定什么表将会被读，以及哪些索引会被访问，哪些临时表会被使用，一个好的策略能够减少大量的磁盘访问和排序操作等。
+6.  存储引擎读写数据和索引文件，cache用来加速这些操作，其他的诸如事物和外键特性，都是在存储引擎层处理的。
+
+存储引擎在物理层管控数据，它负责数据文件、数据、索引、cache等的管理，这使得管理和读取数据变得更高效，每一张表，都有一个.frm文件，这些文件包含着表的定义。
+
+每一个存储引擎管理、存储数据的方式都是不同的，所支持的特性和性能也不尽相同。例如：
+
+-   MyISAM，适合读多写少的环境，且不支持事务，支持全文索引等。
+-   noDB，支持事务，支持行锁和外键等。
+-   MEMORY，将数据存储在内存当中。
+-   CSV，将数据存储为CSV格式。
+
+### 配置环境
+
+&gt; **说明：**
+&gt;以下环境配置仅为参考示例，具体配置视实际需求做配置
+#### 关闭防火墙并取消开机自启动
+
+&gt; **说明：**
+&gt;测试环境下通常会关闭防火墙以避免部分网络因素影响，视实际需求做配置。
+
+1.  在root权限下停止防火墙。
+
+    ```
+    # systemctl stop firewalld
+    ```
+
+2.  在root权限下关闭防火墙。
+
+    ```
+    # systemctl disable firewalld
+    ```
+
+    &gt; **说明：**
+    &gt;执行disable命令关闭防火墙的同时，也取消了开机自启动。
+
+#### 修改SELINUX为disabled
+
+1.  在root权限下修改配置文件。
+
+    ```
+    # sed -i &#39;s/SELINUX=enforcing/SELINUX=disabled/g&#39; /etc/sysconfig/selinux
+    ```
+
+#### 创建组和用户
+
+&gt; **说明：**
+&gt;服务器环境下，为了系统安全，通常会为进程分配单独的用户，以实现权限隔离。本章节创建的组和用户都是操作系统层面的，不是数据库层面的。
+
+1.  在root权限下创建MySQL用户（组）。
+
+    ```
+    # groupadd mysql
+    ```
+
+    ```
+    # useradd -g mysql mysql
+    ```
+
+2.  在root权限下设置MySQL用户密码。
+
+    ```
+    # passwd mysql
+    ```
+
+    重复输入密码（根据实际需求设置密码）。
+
+#### 搭建数据盘
+
+&gt; **说明：**
+&gt;-   进行性能测试时，数据目录使用单独硬盘，需要对硬盘进行格式化并挂载，参考方法一或者方法二
+&gt;-   非性能测试时，在root权限下执行以下命令，创建数据目录即可。然后跳过本小节：
+&gt;    \#mkdir /data
+
+##### 方法一：在root权限下使用fdisk进行磁盘管理
+
+1.  创建分区（以/dev/sdb为例，根据实际情况创建）
+
+    ```
+    # fdisk /dev/sdb
+    ```
+
+2.  输入n，按回车确认。
+3.  输入p，按回车确认。
+4.  输入1，按回车确认。
+5.  采用默认配置，按回车确认。
+6.  采用默认配置，按回车确认。
+7.  输入w，按回车保存。
+8.  创建文件系统（以xfs为例，根据实际需求创建文件系统）
+
+    ```
+    # mkfs.xfs /dev/sdb1
+    ```
+
+9.  挂载分区到“/data”以供操作系统使用。
+
+    ```
+    # mkdir /data
+    ```
+
+    ```
+    # mount /dev/sdb1 /data
+    ```
+
+10. 执行命令“vi /etc/fstab&quot;, 编辑“/etc/fstab”使重启后自动挂载数据盘。如下图中，添加最后一行内容。
+
+    其中，/dev/nvme0n1p1为示例，具体名称以实际情况为准。
+
+##### 方法二：在root权限下使用LVM进行磁盘管理
+
+&gt; **说明：**
+&gt;此步骤需要安装镜像中的lvm2相关包，步骤如下：
+&gt;
+&gt;1.  配置本地yum源，详细信息请参考搭建repo服务器。如果已经执行，则可跳过此步。
+&gt;2.  在root权限下执行命令安装lvm2。
+&gt;   **\# yum install lvm2**
+
+1.  创建物理卷（sdb为硬盘名称，具体名字以实际为准）。
+
+    ```
+    # pvcreate /dev/sdb
+    ```
+
+2.  创建物理卷组（其中datavg为创建的卷组名称，具体名字以实际规划为准）。
+
+    ```
+    # vgcreate datavg  /dev/sdb
+    ```
+
+3.  创建逻辑卷（其中600G为规划的逻辑卷大小，具体大小以实际情况为准；datalv为创建的逻辑卷的名字，具体名称以实际规划为准。\)。
+
+    ```
+    # lvcreate -L 600G -n datalv datavg
+    ```
+
+4.  创建文件系统。
+
+    ```
+    # mkfs.xfs /dev/datavg/datalv
+    ```
+
+5.  创建数据目录并挂载。
+
+    ```
+    # mkdir /data
+    ```
+
+    ```
+    # mount /dev/datavg/datalv /data
+    ```
+
+6.  执行命令**vi /etc/fstab**，编辑“/etc/fstab”使重启后自动挂载数据盘。如下图中，添加最后一行内容。
+
+    其中，/dev/datavg/datalv为示例，具体名称以实际情况为准。
+
+#### 创建数据库目录并且授权
+
+1.  在已创建的数据目录 **/data** 基础上，使用root权限继续创建进程所需的相关目录并授权MySQL用户（组）。
+
+    ```
+    # mkdir -p /data/mariadb
+    # cd /data/mariadb
+    # mkdir data tmp run log
+    # chown -R mysql:mysql /data
+    ```
+
+### 安装、运行和卸载
+#### 安装
+
+1.  配置本地yum源，详细信息请参考搭建repo服务器。
+2.  清除缓存。
+
+    ```
+    $ dnf clean all
+    ```
+
+3.  创建缓存。
+
+    ```
+    $ dnf makecache
+    ```
+
+4.  在root权限下安装mariadb服务器。
+
+    ```
+    # dnf install mariadb-server
+    ```
+
+5.  查看安装后的rpm包。
+
+    ```
+    $ rpm -qa | grep mariadb
+    ```
+
+#### 运行
+
+1.  在root权限下开启mariadb服务器。
+
+    ```
+    # systemctl start mariadb
+    ```
+
+2.  在root权限下初始化数据库。
+
+    ```
+    # /usr/bin/mysql_secure_installation
+    ```
+
+    命令执行过程中需要输入数据库的root设置的密码，若没有密码则直接按“Enter”。然后根据提示及实际情况进行设置。
+
+3.  登录数据库。
+
+    ```
+    $ mysql -u root -p
+    ```
+
+    命令执行后提示输入密码。密码为2中设置的密码。
+
+    &gt; **说明：**
+    &gt;执行 **\\q** 或者 **exit** 可退出数据库。
+
+#### 卸载
+
+1.  在root权限下关闭数据库进程。
+
+    ```
+    $ ps -ef | grep mysql
+    # kill -9 进程ID
+    ```
+
+2.  在root权限下执行**dnf remove mariadb-server**命令卸载mariadb。
+
+    ```
+    # dnf remove mariadb-server
+    ```
+
+### 管理数据库用户
+#### 创建用户
+
+可以使用CREATE USER语句来创建一个或多个用户，并设置相应的口令。
+</code></pre><p>CREATE USER 'username'@'hostname' IDENTIFIED BY 'password';</p><pre><code>
+其中：
+
+-   username：用户名。
+-   host：主机名，即用户连接数据库时所在的主机的名字。若是本地用户可用localhost，若在创建的过程中，未指定主机名，则主机名默认为“%”，表示一组主机。
+-   password：用户的登陆密码，密码可以为空，如果为空则该用户可以不需要密码登陆服务器，但从安全的角度而言，不推荐这种做法。
+
+使用CREATE USER语句必须拥有数据库的INSERT权限或全局CREATE USER权限。
+
+使用CREATE USER语句创建一个用户账号后，会在系统自身的数据库的user表中添加一条新记录。若创建的账户已经存在，则语句执行时会出现错误。
+
+新创建的用户拥有的权限很少，只允许进行不需要权限的操作，如使用SHOW语句查询所有存储引擎和字符集的列表等。
+
+##### 示例
+
+\#创建密码为123456，用户名为userexample1的本地用户。
+</code></pre><blockquote><p>CREATE USER 'userexample1'@'localhost' IDENTIFIED BY '123456';</p></blockquote><pre><code>
+\#创建密码为123456，用户名为userexample2，主机名为192.168.1.100的用户。
+</code></pre><blockquote><p>CREATE USER 'userexample2'@'192.168.1.100' IDENTIFIED BY '123456';</p></blockquote><pre><code>
+#### 查看用户
+
+可以使用SHOW GRANTS语句或SELECT语句查看一个或多个用户。
+
+查看特定用户：
+</code></pre><p>SHOW GRANTS [FOR 'username'@'hostname'];</p><pre><code></code></pre><p>SELECT USER,HOST,PASSWORD FROM mysql.user WHERE USER='username';</p><pre><code>
+查看所有用户：
+</code></pre><p>SELECT USER,HOST,PASSWORD FROM mysql.user;</p><pre><code>
+其中：
+
+-   username：用户名。
+-   hostname：主机名。
+
+##### 示例
+
+\#查看userexample1用户。
+</code></pre><blockquote><p>SHOW GRANTS FOR 'userexample1'@'localhost';</p></blockquote><pre><code>
+\#查看mysql数据库中所有用户。
+</code></pre><blockquote><p>SELECT USER,HOST,PASSWORD FROM mysql.user;</p></blockquote><pre><code>
+#### 修改用户
+
+##### 修改用户名
+
+可以使用RENAME USER语句修改一个或多个已经存在的用户名。
+</code></pre><p>RENAME USER 'oldusername'@'hostname' TO 'newusername'@'hostname';</p><pre><code>
+其中：
+
+-   oldusername：旧的用户名。
+-   newusername：新的用户名。
+-   hostname：主机名。
+
+RENAME USER语句用于对原有的账号进行重命名。若系统中旧账号不存在或者新账号已存在，则该语句执行时会出现错误。
+
+使用RENAME USER语句，必须拥有数据库的UPDATE权限或全局CREATE USER权限。
+
+##### 修改用户示例
+
+\#将用户名userexample1修改为userexapme2，主机名为locahost。
+</code></pre><blockquote><p>RENAME USER 'userexample1'@'localhost' TO 'userexample2'@'localhost';</p></blockquote><pre><code>
+##### 修改用户密码
+
+可以使用SET PASSWORD语句修改一个用户的登录密码。
+</code></pre><p>SET PASSWORD FOR 'username'@'hostname' = PASSWORD('newpassword');</p><pre><code>
+其中：
+
+-   FOR &#39;username&#39;@&#39;hostname&#39;：FOR字句，可选项，指定欲修改密码的用户名及主机名。
+-   PASSWORD\(&#39;newpassword&#39;\)：表示使用函数PASSWORD\(\)设置新口令，即新口令必须传递到函数PASSWORD\(\)中进行加密。
+
+&gt; **注意：**
+&gt;PASSWORD\(\)函数为单向加密函数，一旦加密后不能解密出原明文。
+
+在SET PASSWORD语句中，若不加上FOR子句，表示修改当前用户的密码。
+
+FOR字句中必须以&#39;username&#39;@&#39;hostname&#39;的格式给定，username为账户的用户名，hostname为账户的主机名。
+
+欲修改密码的账号必须在系统中存在，否则语句执行时会出现错误。
+
+##### 修改用户密码示例
+
+\#将用户名为userexample的密码修改为0123456，主机名为locahost。
+</code></pre><blockquote><p>SET PASSWORD FOR 'userexample'@'localhost' = PASSWORD('0123456') ;</p></blockquote><pre><code>
+#### 删除用户
+
+可以使用DROP USER语句来删除一个或多个用户账号以及相关的权限。
+</code></pre><p>DROP USER 'username1'@'hostname1' [,'username2'@'hostname2']…;</p><pre><code>
+&gt; **注意：**
+&gt;用户的删除不会影响他们之前所创建的表、索引或其他数据库对象，因为数据库并不会记录创建了这些对象的账号。
+
+DROP USER语句可用于删除一个或多个数据库账号，并删除其原有权限。
+
+使用DROP USER语句必须拥有数据库的DELETE权限或全局CREATE USER权限。
+
+在DROP USER语句的使用中，若没有明确地给出账号的主机名，则该主机名默认为“%”。
+
+##### 示例
+
+\#删除用户名为userexample的本地用户。
+</code></pre><blockquote><p>DROP USER 'userexample'@'localhost';</p></blockquote><pre><code>
+#### 用户授权
+
+可以使用GRANT语句来对新建用户的授权。
+</code></pre><p>GRANT privileges ON databasename.tablename TO 'username'@'hostname';</p><pre><code>
+其中：
+
+-   ON字句：用于指定权限授予的对象和级别。
+-   privileges：用户的操作权限，如SELECT，INSERT，UPDATE等，如果要授予所有的权限则使用ALL。
+-   databasename：数据库名。
+-   tablename：表名。
+-   TO字句：用来设定用户密码，以及指定被赋予权限的用户。
+-   username：用户名。
+-   hostname：主机名。
+
+如果要授予该用户对所有数据库和表的相应操作权限则可用\*表示，如\*.\*。
+
+如果在TO子句中给系统中存在的用户指定密码，则新密码会将原密码覆盖。
+
+如果权限被授予给一个不存在的用户，则会自动执行一条CREATE USER语句来创建这个用户，但同时必须为该用户指定密码。
+
+##### 示例
+
+\#对本地用户userexample授予SELECT和INSERT权限。
+</code></pre><blockquote><p>GRANT SELECT,INSERT ON <em>.</em> TO 'userexample'@'localhost';</p></blockquote><pre><code>
+#### 删除用户权限
+
+可以使用REVOKE语句来删除一个用户的权限，但此用户不会被删除。
+</code></pre><p>REVOKE privilege ON databasename.tablename FROM 'username'@'hostname';</p><pre><code>
+其中REVOKE语句的参数与GRANT语句的参数含义相同。
+
+要使用 REVOKE 语句，必须拥有数据库的全局CREATE USER权限或UPDATE权限。
+
+##### 示例
+
+\#删除本地用户userexample的INSERT权限。
+</code></pre><blockquote><p>REVOKE INSERT ON <em>.</em> FROM 'userexample'@'localhost';</p></blockquote><pre><code>
+### 管理数据库
+#### 创建数据库
+
+可以使用CREATE DATABASE语句来创建数据库。
+</code></pre><p>CREATE DATABASE databasename;</p><pre><code>
+其中：databasename为数据库名称，且数据库名称不区分大小写。
+
+##### 示例
+
+\#创建数据库名为databaseexample的数据库。
+</code></pre><blockquote><p>CREATE DATABASE databaseexample;</p></blockquote><pre><code>
+#### 查看数据库
+
+可以使用SHOW DATABASES语句来查看数据库。
+</code></pre><p>SHOW DATABASES;</p><pre><code>
+##### 示例
+
+\#查看所有数据库。
+</code></pre><blockquote><p>SHOW DATABASES;</p></blockquote><pre><code>
+#### 选择数据库
+
+一般创建表，查询表等操作首先需要选择一个目标数据库。可以使用USE语句来选择数据库。
+</code></pre><p>USE databasename;</p><pre><code>
+其中：databasename为数据库名称。
+
+##### 示例
+
+\#选择databaseexample数据库。
+</code></pre><blockquote><p>USE databaseexample;</p></blockquote><pre><code>
+#### 删除数据库
+
+可以使用DROP DATABASE语句来删除数据库。
+
+&gt; **注意：**
+&gt;删除数据库要谨慎操作，一旦删除，数据库中的所有表和数据都会删除。
+</code></pre><p>DROP DATABASE databasename;</p><pre><code>
+其中：databasename为数据库名称。
+
+DROP DATABASE命令用于删除创建过\(已存在\)的数据库，且会删除数据库中的所有表，但数据库的用户权限不会自动删除。
+
+要使用DROP DATABASE，您需要数据库的DROP权限。
+
+DROP SCHEMA是DROP DATABASE的同义词。
+
+##### 示例
+
+\#删除databaseexample数据库。
+</code></pre><blockquote><p>DROP DATABASE databaseexample;</p></blockquote><pre><code>
+#### 备份数据库
+
+可以在root权限下使用mysqldump命令备份数据库。
+
+备份一个或多个表：
+</code></pre><p>mysqldump [options] databasename [tablename ...] &gt; outfile</p><pre><code>
+备份一个或多个库：
+</code></pre><p>mysqldump [options] -databases databasename ... &gt; outfile</p><pre><code>
+备份所有库：
+</code></pre><p>mysqldump [options] -all-databases &gt; outputfile</p><pre><code>
+其中：
+
+-   databasename：数据库名称。
+-   tablename：数据表名称。
+-   outfile：数据库备份的文件。
+-   options：mysqldump命令参数选项，多个参数之间可以使用空格分隔。常用的mysqldump命令参数选项如下：
+    -   -u, \-\-user= _username_ ：指定用户名。
+    -   -p, \-\-password\[= _password_\]：指定密码。
+    -   -P, \-\-port= _portnumber_ ：指定端口。
+    -   -h, \-\-host= _hostname_ ：指定主机名。
+    -   -r, \-\-result-file= _filename_ ：将导出结果保存到指定的文件中，等同于“\&gt;”。
+    -   -t：只备份数据。
+    -   -d：只备份表结构。
+
+##### 示例
+
+\#备份主机为192.168.202.144，端口为3306，root用户下的所有数据库到alldb.sql中。
+</code></pre><h1 id="mysqldump--h-192168202144--p-3306--uroot--p123456---all-databases--alldbsql">mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 --all-databases &gt; alldb.sql</h1><pre><code>
+\#备份主机为192.168.202.144，端口为3306，root用户下的db1数据库到db1.sql中。
+</code></pre><h1 id="mysqldump--h-192168202144--p-3306--uroot--p123456---databases-db1--db1sql">mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 --databases db1 &gt; db1.sql</h1><pre><code>
+\#备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的tb1表到db1tb1.sql中。
+</code></pre><h1 id="mysqldump--h-192168202144--p-3306--uroot--p123456-db1-tb1--db1tb1sql">mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 db1 tb1 &gt; db1tb1.sql</h1><pre><code>
+\#只备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的表结构到db1.sql中。
+</code></pre><h1 id="mysqldump--h-192168202144--p-3306--uroot--p123456--d-db1--db1sql">mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 -d db1 &gt; db1.sql</h1><pre><code>
+\#只备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的数据到db1.sql中。
+</code></pre><h1 id="mysqldump--h-192168202144--p-3306--uroot--p123456--t-db1--db1sql">mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 -t db1 &gt; db1.sql</h1><pre><code>
+#### 恢复数据库
+
+可以在root权限下使用mysql命令恢复数据库。
+
+恢复一个或多个表：
+</code></pre><p>mysql -h hostname -P portnumber -u username -ppassword databasename <strong>说明：</strong></p><blockquote><p>以下环境配置仅为参考示例，具体配置视实际需求做配置</p></blockquote><h4 id="关闭防火墙并取消开机自启动-1">关闭防火墙并取消开机自启动</h4><blockquote><p><strong>说明：</strong> 测试环境下通常会关闭防火墙以避免部分网络因素影响，视实际需求做配置。</p></blockquote><ol type="1"><li><p>在root权限下停止防火墙。</p><pre><code># systemctl stop firewalld</code></pre></li><li><p>在root权限下关闭防火墙。</p><pre><code># systemctl disable firewalld</code></pre><blockquote><p><strong>说明：</strong> 执行disable命令关闭防火墙的同时，也取消了开机自启动。</p></blockquote></li></ol><h4 id="修改selinux为disabled-1">修改SELINUX为disabled</h4><ol type="1"><li><p>在root权限下修改配置文件。</p><pre><code># sed -i &#39;s/SELINUX=enforcing/SELINUX=disabled/g&#39; /etc/sysconfig/selinux</code></pre></li></ol><h4 id="创建组和用户-1">创建组和用户</h4><blockquote><p><strong>说明：</strong> 服务器环境下，为了系统安全，通常会为进程分配单独的用户，以实现权限隔离。本章节创建的组和用户都是操作系统层面的，不是数据库层面的。</p></blockquote><ol type="1"><li><p>在root权限下创建MySQL用户（组）。</p><pre><code># groupadd mysql</code></pre><pre><code># useradd -g mysql mysql</code></pre></li><li><p>在root权限下设置MySQL用户密码。</p><pre><code># passwd mysql</code></pre><p>重复输入密码（根据实际需求设置密码）。</p></li></ol><h4 id="搭建数据盘-1">搭建数据盘</h4><blockquote><p><strong>说明：</strong></p><ul><li>进行性能测试时，数据目录使用单独硬盘，需要对硬盘进行格式化并挂载，参考方法一或者方法二</li><li>非性能测试时，在root权限下执行以下命令，创建数据目录即可。然后跳过本小节： # mkdir /data</li></ul></blockquote><h5 id="方法一在root权限下使用fdisk进行磁盘管理">方法一：在root权限下使用fdisk进行磁盘管理</h5><ol type="1"><li><p>创建分区（以/dev/sdb为例，根据实际情况创建）</p><pre><code># fdisk /dev/sdb</code></pre></li><li><p>输入n，按回车确认。</p></li><li><p>输入p，按回车确认。</p></li><li><p>输入1，按回车确认。</p></li><li><p>采用默认配置，按回车确认。</p></li><li><p>采用默认配置，按回车确认。</p></li><li><p>输入w，按回车保存。</p></li><li><p>创建文件系统（以xfs为例，根据实际需求创建文件系统）</p><pre><code># mkfs.xfs /dev/sdb1</code></pre></li><li><p>挂载分区到“/data”以供操作系统使用。</p><pre><code># mkdir /data</code></pre><pre><code># mount /dev/sdb1 /data</code></pre></li><li><p>执行命令“vi /etc/fstab", 编辑“/etc/fstab”使重启后自动挂载数据盘。如下图中，添加最后一行内容。</p><p>其中，/dev/nvme0n1p1为示例，具体名称以实际情况为准。</p></li></ol><h5 id="方法二在root权限下使用lvm进行磁盘管理">方法二：在root权限下使用LVM进行磁盘管理</h5><blockquote><p><strong>说明：</strong> 此步骤需要安装镜像中的lvm2相关包，步骤如下：</p><ol type="1"><li>配置本地yum源，详细信息请参考搭建repo服务器。如果已经执行，则可跳过此步。</li><li>执行命令安装lvm2。 <strong>#yum install lvm2</strong></li></ol></blockquote><ol type="1"><li><p>创建物理卷（sdb为硬盘名称，具体名字以实际为准）。</p><pre><code>#pvcreate /dev/sdb</code></pre></li><li><p>创建物理卷组（其中datavg为创建的卷组名称，具体名字以实际规划为准）。</p><pre><code>#vgcreate  datavg  /dev/sdb</code></pre></li><li><p>创建逻辑卷（其中600G为规划的逻辑卷大小，具体大小以实际情况为准；datalv为创建的逻辑卷的名字，具体名称以实际规划为准。)。</p><pre><code>#lvcreate -L 600G -n datalv datavg</code></pre></li><li><p>创建文件系统。</p><pre><code>#mkfs.xfs /dev/datavg/datalv</code></pre></li><li><p>创建数据目录并挂载。</p><pre><code>#mkdir /data</code></pre><pre><code>#mount /dev/datavg/datalv /data</code></pre></li><li><p>执行命令<strong>vi /etc/fstab</strong>，编辑“/etc/fstab”使重启后自动挂载数据盘。如下图中，添加最后一行内容。</p><p>其中，/dev/datavg/datalv为示例，具体名称以实际情况为准。</p></li></ol><h4 id="创建数据库目录并且授权">创建数据库目录并且授权</h4><ol type="1"><li><p>在已创建的数据目录 <strong>/data</strong> 基础上，使用root权限继续创建进程所需的相关目录并授权MySQL用户（组）。</p><pre><code># mkdir -p /data/mysql
+# cd /data/mysql
+# mkdir data tmp run log
+# chown -R mysql:mysql /data</code></pre></li></ol><h3 id="安装运行和卸载-1">安装、运行和卸载</h3><h4 id="安装-1">安装</h4><ol type="1"><li><p>配置本地yum源，详细信息请参考搭建repo服务器章节。</p></li><li><p>清除缓存。</p><pre><code>$ dnf clean all</code></pre></li><li><p>创建缓存。</p><pre><code>$ dnf makecache</code></pre></li><li><p>在root权限下安装MySQL服务器。</p><pre><code># dnf install mysql-server</code></pre></li><li><p>查看安装后的rpm包。</p><pre><code>$ rpm -qa | grep mysql-server</code></pre></li></ol><h4 id="运行-1">运行</h4><ol type="1"><li><p>修改配置文件。</p><ol type="1"><li><p>在root权限下创建my.cnf文件，其中文件路径（包括软件安装路径basedir、数据路径datadir等）根据实际情况修改。</p><pre><code># vi /etc/my.cnf</code></pre><p>编辑my.cnf内容如下：</p><pre><code>[mysqld_safe]
+log-error=/data/mysql/log/mysql.log
+pid-file=/data/mysql/run/mysqld.pid
+[mysqldump]
+quick
+[mysql]
+no-auto-rehash
+[client]
+default-character-set=utf8
+[mysqld]
+basedir=/usr/local/mysql
+socket=/data/mysql/run/mysql.sock
+tmpdir=/data/mysql/tmp
+datadir=/data/mysql/data
+default_authentication_plugin=mysql_native_password
+port=3306
+user=mysql</code></pre></li><li><p>确保my.cnf配置文件修改正确。</p><pre><code>$ cat /etc/my.cnf</code></pre><blockquote><p><strong>注意：</strong> 其中basedir为软件安装路径，请根据实际情况修改。</p></blockquote></li><li><p>在root权限下修改/etc/my.cnf文件的组和用户为mysql:mysql</p><pre><code># chown mysql:mysql /etc/my.cnf</code></pre></li></ol></li><li><p>配置环境变量。</p><ol type="1"><li><p>安装完成后，在root权限下将MySQL二进制文件路径到PATH。</p><pre><code># echo export  PATH=$PATH:/usr/local/mysql/bin  &gt;&gt; /etc/profile</code></pre><blockquote><p><strong>注意：</strong> 其中PATH中的“/usr/local/mysql/bin“路径，为MySQL软件安装目录下的bin文件的绝对路径。请根据实际情况修改。</p></blockquote></li><li><p>在root权限下使环境变量配置生效。</p><pre><code># source /etc/profile</code></pre></li></ol></li><li><p>在root权限下初始化数据库。</p><blockquote><p><strong>说明：</strong> 本步骤倒数第2行中有初始密码，请注意保存，登录数据库时需要使用。</p></blockquote><pre><code># mysqld --defaults-file=/etc/my.cnf --initialize
+2020-03-18T03:27:13.702385Z 0 [System] [MY-013169] [Server] /usr/local/mysql/bin/mysqld (mysqld 8.0.17) initializing of server in progress as process 34014
+2020-03-18T03:27:24.112453Z 5 [Note] [MY-010454] [Server] A temporary password is generated for root@localhost: iNat=)#V2tZu
+2020-03-18T03:27:28.576003Z 0 [System] [MY-013170] [Server] /usr/local/mysql/bin/mysqld (mysqld 8.0.17) initializing of server has completed</code></pre><p>查看打印信息，打印信息中包括“initializing of server has completed”表示初始化数据库完成，且打印信息中“A temporary password is generated for root@localhost: iNat=)#V2tZu”的“iNat=)#V2tZu”为初始密码。</p></li><li><p>启动数据库。</p><blockquote><p><strong>注意：</strong> 如果第一次启动数据库服务，以root用户启动数据库，则启动时会提示缺少mysql.log文件而导致失败。使用mysql用户启动之后，会在/data/mysql/log目录下生成mysql.log文件，再次使用root用户启动则不会报错。</p></blockquote><ol type="1"><li><p>在root权限下修改文件权限。</p><pre><code># chmod 777 /usr/local/mysql/support-files/mysql.server</code></pre></li><li><p>在root权限下启动MySQL。</p><pre><code># cp /usr/local/mysql/support-files/mysql.server /etc/init.d/mysql
+# chkconfig mysql on</code></pre><p>以mysql用户启动数据库。</p><pre><code># su - mysql
+$ service mysql start</code></pre></li></ol></li><li><p>登录数据库。</p><blockquote><p><strong>说明：</strong></p><ul><li>提示输入密码时，请输入3产生的初始密码。</li><li>如果采用官网RPM安装方式，则mysql文件在/usr/bin目录下。登录数据库的命令根据实际情况修改。</li></ul></blockquote><pre><code>$ /usr/local/mysql/bin/mysql -uroot -p  -S /data/mysql/run/mysql.sock</code></pre></li><li><p>配置数据库帐号密码。</p><ol type="1"><li><p>登录数据库以后，修改通过root用户登录数据库的密码。</p><pre><code>mysql&gt; alter user &#39;root&#39;@&#39;localhost&#39; identified by &quot;123456&quot;;</code></pre></li><li><p>创建全域root用户（允许root从其他服务器访问）。</p><pre><code>mysql&gt; create user &#39;root&#39;@&#39;%&#39; identified by &#39;123456&#39;;</code></pre></li><li><p>进行授权。</p><pre><code>mysql&gt; grant all privileges on *.* to &#39;root&#39;@&#39;%&#39;;
+mysql&gt; flush privileges;</code></pre></li></ol></li><li><p>退出数据库。</p><p>执行 <strong>\q</strong> 或者 <strong>exit</strong> 退出数据库。</p><pre><code>mysql&gt; exit</code></pre></li></ol><h4 id="卸载-1">卸载</h4><ol type="1"><li><p>在root权限下关闭数据库进程。</p><pre><code>$ ps -ef | grep mysql
+# kill -9 进程ID</code></pre></li><li><p>在root权限下执行<strong>dnf remove mysql</strong>命令卸载MySQL。</p><pre><code># dnf remove mysql</code></pre></li></ol><h3 id="管理数据库用户">管理数据库用户</h3><h4 id="创建用户">创建用户</h4><p>可以使用CREATE USER语句来创建一个或多个用户，并设置相应的口令。</p><pre><code>CREATE USER &#39;username&#39;@&#39;hostname&#39; IDENTIFIED BY &#39;password&#39;;</code></pre><p>其中：</p><ul><li>username：用户名。</li><li>host：主机名，即用户连接数据库时所在的主机的名字。若是本地用户可用localhost，若在创建的过程中，未指定主机名，则主机名默认为“%”，表示一组主机。</li><li>password：用户的登陆密码，密码可以为空，如果为空则该用户可以不需要密码登陆服务器，但从安全的角度而言，不推荐这种做法。</li></ul><p>使用CREATE USER语句必须拥有数据库的INSERT权限或全局CREATE USER权限。</p><p>使用CREATE USER语句创建一个用户账号后，会在系统自身的数据库的user表中添加一条新记录。若创建的账户已经存在，则语句执行时会出现错误。</p><p>新创建的用户拥有的权限很少，只允许进行不需要权限的操作，如使用SHOW语句查询所有存储引擎和字符集的列表等。</p><h5 id="示例-10">示例</h5><p>#创建密码为123456，用户名为userexample1的本地用户。</p><pre><code>&gt; CREATE USER &#39;userexample1&#39;@&#39;localhost&#39; IDENTIFIED BY &#39;123456&#39;;</code></pre><p>#创建密码为123456，用户名为userexample2，主机名为192.168.1.100的用户。</p><pre><code>&gt; CREATE USER &#39;userexample2&#39;@&#39;192.168.1.100&#39; IDENTIFIED BY &#39;123456&#39;;</code></pre><h4 id="查看用户">查看用户</h4><p>可以使用SHOW GRANTS语句或SELECT语句查看一个或多个用户。</p><p>查看特定用户：</p><pre><code>SHOW GRANTS [FOR &#39;username&#39;@&#39;hostname&#39;];</code></pre><pre><code>SELECT USER,HOST,PASSWORD FROM mysql.user WHERE USER=&#39;username&#39;;</code></pre><p>查看所有用户：</p><pre><code>SELECT USER,HOST FROM mysql.user;</code></pre><p>其中：</p><ul><li>username：用户名。</li><li>hostname：主机名。</li></ul><h5 id="示例-11">示例</h5><p>#查看userexample1用户。</p><pre><code>&gt; SHOW GRANTS FOR &#39;userexample1&#39;@&#39;localhost&#39;;</code></pre><p>#查看mysql数据库中所有用户。</p><pre><code>&gt; SELECT USER,HOST FROM mysql.user;</code></pre><h4 id="修改用户">修改用户</h4><h5 id="修改用户名-1">修改用户名</h5><p>可以使用RENAME USER语句修改一个或多个已经存在的用户名。</p><pre><code>RENAME USER &#39;oldusername&#39;@&#39;hostname&#39; TO &#39;newusername&#39;@&#39;hostname&#39;;</code></pre><p>其中：</p><ul><li>oldusername：旧的用户名。</li><li>newusername：新的用户名。</li><li>hostname：主机名。</li></ul><p>RENAME USER语句用于对原有的账号进行重命名。若系统中旧账号不存在或者新账号已存在，则该语句执行时会出现错误。</p><p>使用RENAME USER语句，必须拥有数据库的UPDATE权限或全局CREATE USER权限。</p><h5 id="修改用户示例-1">修改用户示例</h5><p>#将用户名userexample1修改为userexapme2，主机名为locahost。</p><pre><code>&gt; RENAME USER &#39;userexample1&#39;@&#39;localhost&#39; TO &#39;userexample2&#39;@&#39;localhost&#39;;</code></pre><h5 id="修改用户密码-1">修改用户密码</h5><p>可以使用SET PASSWORD语句修改一个用户的登录密码。</p><pre><code>SET PASSWORD FOR &#39;username&#39;@&#39;hostname&#39; = &#39;newpassword&#39;;</code></pre><p>其中：</p><ul><li>FOR 'username'@'hostname'：FOR字句，可选项，指定欲修改密码的用户名及主机名。</li><li>'newpassword'：新密码。</li></ul><p>在SET PASSWORD语句中，若不加上FOR子句，表示修改当前用户的密码。</p><p>FOR字句中必须以'username'@'hostname'的格式给定，username为账户的用户名，hostname为账户的主机名。</p><p>欲修改密码的账号必须在系统中存在，否则语句执行时会出现错误。</p><h5 id="修改用户密码示例">修改用户密码示例</h5><p>#将用户名为userexample的密码修改为0123456，主机名为locahost。</p><pre><code>&gt; SET PASSWORD FOR &#39;userexample&#39;@&#39;localhost&#39; = &#39;0123456&#39;;</code></pre><h4 id="删除用户">删除用户</h4><p>可以使用DROP USER语句来删除一个或多个用户账号以及相关的权限。</p><pre><code>DROP USER &#39;username1&#39;@&#39;hostname1&#39; [,&#39;username2&#39;@&#39;hostname2&#39;]…;</code></pre><blockquote><p><strong>注意：</strong> 用户的删除不会影响他们之前所创建的表、索引或其他数据库对象，因为数据库并不会记录创建了这些对象的账号。</p></blockquote><p>DROP USER语句可用于删除一个或多个数据库账号，并删除其原有权限。</p><p>使用DROP USER语句必须拥有数据库的DELETE权限或全局CREATE USER权限。</p><p>在DROP USER语句的使用中，若没有明确地给出账号的主机名，则该主机名默认为“%”。</p><h5 id="示例-12">示例</h5><p>#删除用户名为userexample的本地用户。</p><pre><code>&gt; DROP USER &#39;userexample&#39;@&#39;localhost&#39;;</code></pre><h4 id="用户授权">用户授权</h4><p>可以使用GRANT语句来对新建用户的授权。</p><pre><code>GRANT privileges ON databasename.tablename TO &#39;username&#39;@&#39;hostname&#39;;</code></pre><p>其中：</p><ul><li>ON字句：用于指定权限授予的对象和级别。</li><li>privileges：用户的操作权限，如SELECT，INSERT，UPDATE等，如果要授予所有的权限则使用ALL。</li><li>databasename：数据库名。</li><li>tablename：表名。</li><li>TO字句：用来设定用户密码，以及指定被赋予权限的用户。</li><li>username：用户名。</li><li>hostname：主机名。</li></ul><p>如果要授予该用户对所有数据库和表的相应操作权限则可用*表示，如*.*。</p><p>如果在TO子句中给系统中存在的用户指定密码，则新密码会将原密码覆盖。</p><p>如果权限被授予给一个不存在的用户，则会自动执行一条CREATE USER语句来创建这个用户，但同时必须为该用户指定密码。</p><h5 id="示例-13">示例</h5><p>#对本地用户userexample授予SELECT和INSERT权限。</p><pre><code>&gt; GRANT SELECT,INSERT ON *.* TO &#39;userexample&#39;@&#39;localhost&#39;;</code></pre><h4 id="删除用户权限-1">删除用户权限</h4><p>可以使用REVOKE语句来删除一个用户的权限，但此用户不会被删除。</p><pre><code>REVOKE privilege ON databasename.tablename FROM &#39;username&#39;@&#39;hostname&#39;;</code></pre><p>其中REVOKE语句的参数与GRANT语句的参数含义相同。</p><p>要使用 REVOKE 语句，必须拥有数据库的全局CREATE USER权限或UPDATE权限。</p><h5 id="示例-14">示例</h5><p>#删除本地用户userexample的INSERT权限。</p><pre><code>&gt; REVOKE INSERT ON *.* FROM &#39;userexample&#39;@&#39;localhost&#39;;</code></pre><h3 id="管理数据库-1">管理数据库</h3><h4 id="创建数据库-1">创建数据库</h4><p>可以使用CREATE DATABASE语句来创建数据库。</p><pre><code>CREATE DATABASE databasename;</code></pre><p>其中：databasename为数据库名称，且数据库名称不区分大小写。</p><h5 id="示例-15">示例</h5><p>#创建数据库名为databaseexample的数据库。</p><pre><code>&gt; CREATE DATABASE databaseexample;</code></pre><h4 id="查看数据库-1">查看数据库</h4><p>可以使用SHOW DATABASES语句来查看数据库。</p><pre><code>SHOW DATABASES;</code></pre><h5 id="示例-16">示例</h5><p>#查看所有数据库。</p><pre><code>&gt; SHOW DATABASES;</code></pre><h4 id="选择数据库-1">选择数据库</h4><p>一般创建表，查询表等操作首先需要选择一个目标数据库。可以使用USE语句来选择数据库。</p><pre><code>USE databasename;</code></pre><p>其中：databasename为数据库名称。</p><h5 id="示例-17">示例</h5><p>#选择databaseexample数据库。</p><pre><code>&gt; USE databaseexample;</code></pre><h4 id="删除数据库-1">删除数据库</h4><p>可以使用DROP DATABASE语句来删除数据库。</p><blockquote><p><strong>注意：</strong> 删除数据库要谨慎操作，一旦删除，数据库中的所有表和数据都会删除。</p></blockquote><pre><code>DROP DATABASE databasename;</code></pre><p>其中：databasename为数据库名称。</p><p>DROP DATABASE命令用于删除创建过(已存在)的数据库，且会删除数据库中的所有表，但数据库的用户权限不会自动删除。</p><p>要使用DROP DATABASE，您需要数据库的DROP权限。</p><p>DROP SCHEMA是DROP DATABASE的同义词。</p><h5 id="示例-18">示例</h5><p>#删除databaseexample数据库。</p><pre><code>&gt; DROP DATABASE databaseexample;</code></pre><h4 id="备份数据库-1">备份数据库</h4><p>可以在root权限下使用mysqldump命令备份数据库。</p><p>备份一个或多个表：</p><pre><code>mysqldump [options] databasename [tablename ...] &gt; outfile</code></pre><p>备份一个或多个库：</p><pre><code>mysqldump [options] -databases databasename ... &gt; outfile</code></pre><p>备份所有库：</p><pre><code>mysqldump [options] -all-databases &gt; outputfile</code></pre><p>其中：</p><ul><li>databasename：数据库名称。</li><li>tablename：数据表名称。</li><li>outfile：数据库备份的文件。</li><li>options：mysqldump命令参数选项，多个参数之间可以使用空格分隔。常用的mysqldump命令参数选项如下：<ul><li>-u, --user= <em>username</em> ：指定用户名。</li><li>-p, --password[= <em>password</em>]：指定密码。</li><li>-P, --port= <em>portnumber</em> ：指定端口。</li><li>-h, --host= <em>hostname</em> ：指定主机名。</li><li>-r, --result-file= <em>filename</em> ：将导出结果保存到指定的文件中，等同于“&gt;”。</li><li>-t：只备份数据。</li><li>-d：只备份表结构。</li></ul></li></ul><h5 id="示例-19">示例</h5><p>#备份主机为192.168.202.144，端口为3306，root用户下的所有数据库到alldb.sql中。</p><pre><code># mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 --all-databases &gt; alldb.sql</code></pre><p>#备份主机为192.168.202.144，端口为3306，root用户下的db1数据库到db1.sql中。</p><pre><code># mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 --databases db1 &gt; db1.sql</code></pre><p>#备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的tb1表到db1tb1.sql中。</p><pre><code># mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 db1 tb1 &gt; db1tb1.sql</code></pre><p>#只备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的表结构到db1.sql中。</p><pre><code># mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 -d db1 &gt; db1.sql</code></pre><p>#只备份主机为192.168.202.144，端口为3306，root用户下的db1数据库的数据到db1.sql中。</p><pre><code># mysqldump -h 192.168.202.144 -P 3306 -uroot -p123456 -t db1 &gt; db1.sql</code></pre><h4 id="恢复数据库-1">恢复数据库</h4><p>可以在root权限下使用mysql命令恢复数据库。</p><p>恢复一个或多个表：</p><pre><code>mysql -h hostname -P portnumber -u username -ppassword databasename &lt; infile</code></pre><p>其中：</p><ul><li>hostname：主机名。</li><li>portnumber：端口号。</li><li>username：用户名。</li><li>password：密码。</li><li>databasename：数据库名。</li><li>infile：mysqldump命令中的outfile参数。</li></ul><h5 id="示例-20">示例</h5><p>#恢复数据库。</p><pre><code># mysql -h 192.168.202.144 -P 3306 -uroot -p123456 -t db1 &lt; db1.sql</code></pre>
+</body>
+</html>

@@ -1,0 +1,3 @@
+# Converted corpus files and upstream license snapshots are checksum-pinned artifacts.
+data/chinese-enterprise-rag-v1/corpus/** -whitespace
+data/chinese-enterprise-rag-v1/licenses/** -whitespace

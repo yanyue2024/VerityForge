@@ -1,175 +1,119 @@
-# Architecture
+# 系统架构
 
-The repository is a modular monolith with a separately deployed ingestion worker. PostgreSQL is the business and
-index source of truth; Redis only coordinates asynchronous work and transient state.
+VerityForge 是模块化单体加独立入库 Worker 的桌面 Web 系统。PostgreSQL 同时保存业务状态、文档版本、检索索引和运行 Artifact，是唯一业务事实来源；Redis 负责异步协调与缓存，MinIO 保存原始文件和派生资产。
 
 ```mermaid
 flowchart LR
-    WEB["Vue workbench"] --> API["rag-api"]
-    API --> APP["Application use cases"]
-    APP --> DOMAIN["Domain state and ports"]
+    WEB["Vue 3 桌面工作台"] --> API["rag-api"]
+    API --> APP["Application 用例层"]
+    APP --> DOMAIN["Domain 策略与端口"]
     APP --> PG["PostgreSQL + pgvector"]
-    API --> OUTBOX["Transactional outbox"]
+    API --> OUTBOX["Transactional Outbox"]
     OUTBOX --> REDIS["Redis Streams"]
     REDIS --> WORKER["rag-worker"]
-    WORKER --> PARSER["Java parsers / Python sidecar"]
-    PARSER --> MINIO["MinIO"]
+    WORKER --> PARSER["Java 解析器 / Parser Sidecar"]
+    WORKER --> MINIO["MinIO 文档资产"]
     WORKER --> PG
+    APP --> MODEL["OpenAI-compatible / 本地模型"]
 ```
 
-Operational telemetry follows a separate, non-authoritative path:
+## 模块边界
+
+| 模块 | 责任 |
+| --- | --- |
+| `modules/rag-contract` | REST、SSE、事件和 Sidecar 的版本化数据契约 |
+| `modules/rag-domain` | 分块、检索范围、Deep 状态、预算、证据与出站端口；不依赖 SQL |
+| `modules/rag-application` | 知识库、Fast、Deep、Auto、评测和管理用例编排 |
+| `modules/rag-infrastructure` | jOOQ、PostgreSQL、pgvector、Redis、MinIO、模型和解析器适配 |
+| `apps/rag-api` | 认证授权、REST、可续接 SSE、调度和管理入口 |
+| `apps/rag-worker` | 消费入库任务并幂等推进解析、分块、Embedding 和发布阶段 |
+| `web` | Vue 3 + TypeScript 的桌面工作台 |
+| `parser-sidecar` | 可选的高级 PDF、OCR 和版面解析 |
+| `model-sidecar` | 可选的本地 BGE-M3 Embedding 与 Rerank 服务 |
+
+依赖方向从 API / Worker 指向 Application、Domain 和 Contract。Domain 只声明规则与端口，基础设施实现具体存储和模型访问，因此 Fast、Deep 与评测可以在不把数据库细节带入领域模型的前提下复用同一检索契约。
+
+## 数据与发布边界
+
+核心关系如下：
 
 ```mermaid
 flowchart LR
-    API["rag-api"] -->|"OTLP metrics + traces"| OTEL["OpenTelemetry Collector"]
-    WORKER["rag-worker"] -->|"OTLP metrics + traces"| OTEL
-    OTEL -->|"Prometheus exposition"| PROM["Prometheus"]
-    OTEL -->|"OTLP traces"| TEMPO["Tempo"]
-    TEMPO -->|"span metrics"| PROM
-    PROM --> ALERTS["Alertmanager"]
-    PROM --> GRAFANA["Grafana"]
-    TEMPO --> GRAFANA
+    KB["KnowledgeBase"] --> DOC["Document"]
+    DOC --> VER["DocumentVersion"]
+    VER --> BLOCK["SourceBlock"]
+    VER --> PARENT["Parent Chunk"]
+    PARENT --> CHILD["Child Chunk"]
+    CHILD --> VECTOR["Index Generation Vector"]
+    CHILD --> CITATION["Citation / Retrieval Trace"]
+    PARENT --> EVIDENCE["Accepted Evidence"]
+    EVIDENCE --> CITATION
 ```
 
-All observability management ports bind to host loopback and are excluded from the public FRPC route. Telemetry can
-be discarded and rebuilt without changing document, conversation, Run, or ingestion state in PostgreSQL.
+`DocumentVersion` 发布后不可变。新版本在不可检索状态下完成解析和索引，然后在一个事务中切换 `current_version_id`；旧版本仍保留，以便历史回答的引用可以继续解析。所有检索都通过 `RetrievalScope` 强制约束组织、用户权限、知识库、文档过滤器、有效期、当前版本和启用状态。
 
-## Module boundaries
+父子分块的当前默认策略为：父块目标 1,000 Token、上限 1,200、重叠 100；子块目标 250、上限 384、重叠 40。子块负责精确召回，父块负责答案上下文和人工核验。策略名为 `parent-child-250-1000-final`，它是当前公开版本的稳定标识。
 
-- `rag-contract` contains versioned REST, SSE, and parser contracts.
-- `rag-domain` contains chunking, retrieval scope, Agent state, budgets, and outbound ports without Spring AI or SQL.
-- `rag-application` coordinates document ingestion, Fast RAG, persistent Agent runs, and event streaming.
-- `rag-infrastructure` implements jOOQ persistence, pgvector retrieval, object storage, Redis, and model adapters.
-- `rag-api` owns authentication, authorization, REST endpoints, and resumable SSE.
-- `rag-worker` consumes ingestion notifications and idempotently advances persisted stages.
+## 入库与恢复
 
-## Authentication and team roles
+上传首先创建 Upload Intent，文件进入对象存储后才提交处理任务。API 在同一数据库事务中写入业务状态和 Outbox；Dispatcher 将事件送入 Redis Stream，Worker 消费后推进各阶段。业务状态不依赖 Redis 消息是否仍存在。
 
-The deployment has one organization with `ADMIN`, `EDITOR`, and `VIEWER` roles. Passwords use Argon2id and usernames
-are unique case-insensitively inside the organization. JWTs contain a persisted `auth_version`; the authentication
-filter verifies the signature and then reloads the enabled user and session version from PostgreSQL. Disabling a
-member, changing a role, resetting a password, or changing one's own password increments that version, so previously
-issued tokens stop authorizing requests immediately. Team administration is server-enforced with method security;
-frontend route visibility is only an ergonomic reflection of the backend policy.
-
-Members are disabled rather than deleted because knowledge, conversations, evaluation schedules, and audit records
-retain creator references. Transactional update rules prevent the current administrator from disabling or demoting
-themselves and prevent the organization from losing its final enabled administrator.
-
-## Knowledge publication
-
-`DocumentVersion` is immutable after publication. A new version is parsed and indexed while hidden, then
-`current_version_id` is changed in one transaction. `RetrievalScope` always applies organization, publication,
-validity, current-version, and enabled-chunk predicates. Old chunks remain addressable for historical citations
-until retention cleanup.
-
-## Ingestion and index generations
-
-Ingestion stages are individually persisted and idempotent. Duplicate Redis deliveries stop at the completed job;
-after a stage failure, an attempt resumes from the first non-successful stage. Publication locks the logical document
-and changes the old version status, new version status, and `current_version_id` in one PostgreSQL transaction, so a
-pointer-switch failure leaves the old published version fully retrievable.
-
-The Redis Stream is durable coordination rather than job state. The Worker first drains its own Pending entries,
-claims entries whose previous consumer has been idle beyond the configured threshold, and then reads new entries.
-Missing consumer groups are recreated, malformed entries are moved to a dead-letter Stream, and the source Stream
-is kept persistent without a key TTL. Outbox retry attempts and backoff are committed in PostgreSQL even when Redis
-is unavailable.
-
-Each running ingestion attempt persists `heartbeat_at`. A periodic heartbeat covers long parser, object-storage,
-and model calls; every stage write also locks the Job and verifies the expected attempt number. Stale recovery
-atomically either requeues the Job with an Outbox event or, after the retry limit, fails the Job and unpublished
-version. A recovered old Worker therefore cannot write artifacts, vectors, stage state, or publication pointers.
-This Worker lease timeout is an infrastructure recovery boundary and does not impose a Fast/Deep answer deadline.
-
-An Index Rebuild writes only to a `BUILDING` Generation while retrieval continues using the existing `ACTIVE`
-Generation. Each batch commits independently and the job retries up to three attempts without discarding completed
-vectors. Progress and activation coverage are computed from the current published, enabled child-Chunk set rather
-than only the job-creation snapshot, so documents published during a rebuild are included. Activation is deferred
-while ingestion is pending or running and retires the old Generation in the same transaction that activates the new
-one. A heartbeat recovery process requeues stale attempts; an attempt number fences late work from a superseded
-Worker. The KnowledgeOps table exposes attempt count, next retry time, and the last error.
-
-## Retrieval and Agent execution
-
-Fast RAG runs keyword and semantic retrieval concurrently, fuses candidates with RRF, expands parent and adjacent
-context, reranks, generates, persists citations, and streams replayable events.
-
-There are two deliberately versioned Deep runtimes. Existing `agentic-react-v1` records remain resumable through the
-ReAct persistence adapter. New Deep and AUTO-routed complex runs use `agentic-hybrid-v2`, so changing the orchestration
-does not reinterpret an old checkpoint.
-
-`agentic-hybrid-v2` is a controlled loop rather than an unconstrained tool conversation:
+每个阶段独立持久化且幂等：
 
 ```text
-AUTO/DEEP
-  -> short-memory query rewrite (only when needed)
-  -> Planner: independent subquestions + per-query KEYWORD/SEMANTIC/HYBRID strategy
-  -> concurrent RetrievalTask batches (maximum parallelism 4)
-       KEYWORD: keyword candidates
-       SEMANTIC: dense candidates
-       HYBRID: keyword + dense -> per-query RRF fusion
-       each query -> per-query Rerank -> query-local Top K
-  -> Deep Read: parent + adjacent context expansion, fair task allocation
-  -> bounded evidence extraction batches (up to 3 subquestions/request): exact source spans -> EvidenceItem / evidence pool
-  -> mandatory Evidence Judge
-       sufficient -> evidence-grounded synthesis
-       insufficient -> gap-specific queries -> next retrieval round
+上传确认 -> 解析 -> 规范化 / 质量检查 -> 父子分块 -> Embedding -> 发布
 ```
 
-The fusion and rerank boundary is intentionally query-local. Results from unrelated subquestions are not put into a
-single global ranking where one prolific question could starve another; the planner's task and the Evidence Judge
-provide the cross-question coordination point.
+Worker 为运行中的 Attempt 写入心跳和 Attempt 编号。超时恢复会原子地重新排队或在超过上限后失败；旧 Worker 的迟到写入会被编号栅栏拒绝。重复消息会在已完成阶段停止，不会重复发布文档。
 
-Deep Read consumes the selected child hit only as a locator, expands it to its parent Chunk and adjacent parent
-Chunks, and asks the evidence extractor to select a minimal continuous quote. Up to three independent subquestions
-share one structured extraction request and batches execute serially, while retrieval tasks retain their concurrency
-cap of 4. The server locates every quote in the expanded source and calculates
-its offsets; PDF/Markdown line-wrap whitespace may be normalized for matching, but the persisted quote is always the
-exact original source slice. Schema-invalid model output gets one repair attempt, while transport/time-out failures do
-not trigger a second semantic repair request. Failed context is not promoted into the evidence pool; a
-`DEEP_READ_FAILED` event leaves the missing evidence for the Judge and the next gap round. A physical Chunk consumes the deep-read
-counter once, while the same immutable evidence may be linked independently to multiple subquestions with a
-`cross-question-reuse` diagnostic source.
+索引重建写入独立的 `BUILDING` Generation，在线检索继续读取 `ACTIVE` Generation。新代际覆盖当前所有已发布子块并通过激活检查后，才在事务中替换旧代际。文档发布和索引重建因此不会让线上查询落入半成品索引。
 
-The v2 Evidence Judge is intentionally lightweight: it receives the plan and evidence pool directly, checks semantic
-completion conditions, and Java deterministically enforces at least one deep-read evidence family per covered
-subquestion plus conflict/gap constraints. It does not require the legacy Fact Ledger. Coverage and Judge results are
-persisted before synthesis; a model cannot skip the Judge or declare an unsupported subquestion covered. Search
-counters and the configurable `agenticLoopTimeoutSeconds` soft deadline prevent an unbounded retrieval loop. This
-deadline is checked between stages rather than interrupting an in-flight model request. Final answer generation has
-its own model timeout and is not silently truncated to fit the retrieval budget.
+## 三种回答模式
 
-## Evaluation
+Fast、Deep 和 Auto 共用认证、检索范围、模型 Profile、引用持久化与 SSE 事件，但由 `RunCoordinator` 选择不同的当前实现。
 
-Evaluation datasets keep insertion-stable questions, expected document IDs, optional expected answers, and custom
-metadata. Standalone cases create independent hidden conversations; cases sharing `conversationGroup` execute by
-contiguous `conversationTurn` in one conversation, so follow-up queries use the production short-memory and rewrite
-path. A failed group turn skips its later turns rather than evaluating them against incomplete context. Runs execute
-the same Fast or Deep pipeline as production chat. Results link to the
-actual `rag_run`, use Fast retrieval candidates or persisted Deep evidence as appropriate, and aggregate Recall@10,
-MRR, Hit@10, generated-answer coverage, no-answer accuracy, citation resolvability, effective-version leakage,
-failures, and P95 latency. Metrics without grading labels are excluded from the relevant aggregate denominator.
-Expected and forbidden document IDs are ownership-validated on import; forbidden Top-10 hits and leak-free rate are
-observational diagnostics. Datasets can be moved through a versioned JSON bundle with organization ownership
-validation. An explicit comparison
-creates linked Fast and Deep Runs with identical scope, filters, model settings, and optional judge mode. Model judging
-is opt-in and evaluates semantic answer correctness and citation entailment from the persisted answer and evidence;
-judge failures are recorded per case and do not erase an otherwise successful RAG result.
-The evaluator has no independent three-minute deadline: it polls the persisted RAG Run until a real terminal state,
-and remains interruptible during application shutdown. This prevents a slow but healthy final generation from being
-cancelled by the evaluation wrapper.
+```mermaid
+flowchart TD
+    Q["用户问题"] --> MODE{"请求模式"}
+    MODE -->|Fast| FAST["FastRagPipeline"]
+    MODE -->|Deep| DEEP["DeepRagPipeline"]
+    MODE -->|Auto| ROUTER["AutoModeRouter"]
+    ROUTER -->|直接或预检索后选择| FAST
+    ROUTER -->|复杂、低置信或失败保护| DEEP
+    FAST --> ANSWER["流式答案 + 可解析引用"]
+    DEEP --> ANSWER
+```
 
-Regression schedules are PostgreSQL records rather than process-local cron definitions. Each record stores the
-dataset, creator, cadence, knowledge scope, typed filters, model override, and judge mode. The API scheduler claims
-due rows with one `FOR UPDATE SKIP LOCKED` update that advances `next_run_at`; another API instance therefore cannot
-claim the same occurrence. A schedule is ineligible while its last linked Fast/Deep comparison still has a queued or
-running Run. Manual `run-now` uses the same application use case without enabling the schedule. Trend queries join
-the latest comparison pairs to their persisted aggregate Run metrics instead of copying metric snapshots.
+Fast 读取最近 8 轮对话，在存在短指代或上下文依赖时执行 Query Rewrite；随后并发关键词和语义检索、RRF 融合、Rerank、父级上下文扩展、Token 装包和一次流式回答。用户确认的长期记忆最多读取 20 条，只进入个性化上下文，并明确标为不可作为企业文档证据。
 
-An enabled schedule snapshots its webhook endpoint and encrypted signing secret into a unique notification delivery
-when a comparison is launched. A separate dispatcher claims the delivery only after both linked Evaluation Runs are
-terminal. `WAITING`, `DELIVERING`, `RETRY`, `SUCCEEDED`, and `FAILED` are persisted independently from comparison
-state; attempt fencing prevents a late dispatcher from overwriting a newer retry. Delivery uses HMAC-SHA256 over
-`timestamp + "." + rawBody`, applies bounded exponential backoff, and stores only truncated response diagnostics.
-Private, loopback, link-local, multicast, and IPv6 unique-local destinations are rejected by default.
+Deep 是有界状态机：问题分析最多生成 3 个 Goal，每个 Goal 最多 3 个 Requirement 和一组 Keyword / Semantic Query；Goal 间并发研究，子块映射父块后按 Goal 批量深读。Evidence Judge 判断各 Requirement 是否覆盖，缺失 Goal 最多进行一轮 Read More 或 Repair Research，随后按唯一父块和覆盖优先级装包，最多生成一次最终回答。完整运行、预算和阶段快照都写入 PostgreSQL，可用于评测与审计。
+
+Auto 不调用额外路由模型。明确的复杂信号先倾向 Deep；多 Goal / 分阶段问题可复用一次 Fast 预检索，用 Top-5 标题命中判断是否允许走 Fast。预检索异常、空问题或不确定输入固定选择 Deep。默认 `RETRIEVAL_AWARE_50` 是成本优先档，而非“永远自动选最优”的承诺。
+
+## 引用与事件
+
+Fast 保存关键词、语义、RRF、Rerank 和最终上下文的检索 Trace；Deep 额外保存 Goal、Requirement、候选、Deep Read、Accepted Evidence、Judge 决策和阶段 Checkpoint。答案中的编号引用绑定具体文档版本和 Chunk，服务端在持久化前校验引用是否来自本次允许的证据集合。
+
+SSE 事件写入可回放的运行事件流。浏览器断线后可以从已确认的事件序号继续订阅；页面展示的是同一条服务端运行状态，而不是前端推测出的进度。
+
+## 评测复用生产链路
+
+评测问题保存期望文档、可选期望答案、禁止文档和场景 Metadata。每个案例调用与聊天相同的 Fast 或 Deep Pipeline；结果关联真实 `rag_run` 和持久化证据，不另造一套“离线简化版”检索器。
+
+连续对话案例用 `conversationGroup` 与 `conversationTurn` 在同一个隐藏会话内顺序执行。Fast / Deep 对照固定相同的知识范围、过滤器和模型配置。模型 Judge 是显式开启的可选阶段，失败时记录为 Judge 失败，不会抹去已经成功的 RAG 运行。
+
+## 安全与权限
+
+- 角色为 `ADMIN`、`EDITOR`、`VIEWER`，授权由后端方法级检查执行。
+- 密码使用 Argon2id；JWT 绑定数据库中的 `auth_version`，禁用成员、改角色或改密码会使旧 Token 失效。
+- 模型和评测 Webhook 凭据使用带 Key ID 的 AES-256-GCM 信封加密，API 只返回 `hasApiKey`。
+- 组织、当前版本、有效期与文档权限均在服务端检索范围中执行，前端过滤不构成安全边界。
+- Webhook 默认拒绝私网、环回、链路本地、多播和 IPv6 ULA 地址，以降低 SSRF 风险。
+
+## 可观测性与非权威状态
+
+可选的 OpenTelemetry、Prometheus、Tempo、Alertmanager 与 Grafana 只接收低基数指标和 Trace。查询、文档正文、用户 ID、API Key 和 Run ID 不作为指标标签。遥测可以丢弃重建，不影响 PostgreSQL 中的文档、会话、评测或运行状态。
+
+## 历史 Artifact 兼容
+
+公开源码只有一套当前 Fast 和一套当前 Deep 编排。数据库迁移、旧运行恢复适配器和评测查询中仍识别少量历史 `pipeline_version`，目的仅是读取已持久化的旧运行结果并保持引用可解析；`RunCoordinator` 不会把新请求发送到这些旧实现。这个兼容层是数据迁移边界，不是多套产品版本并存。

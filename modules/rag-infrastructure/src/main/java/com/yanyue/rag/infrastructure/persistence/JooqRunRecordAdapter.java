@@ -7,8 +7,7 @@ import com.yanyue.rag.contract.chat.CreateRunRequest;
 import com.yanyue.rag.contract.chat.KnowledgeScope;
 import com.yanyue.rag.contract.chat.MetadataFilter;
 import com.yanyue.rag.contract.chat.RunMode;
-import com.yanyue.rag.domain.agent.v7.AgenticV7Limits;
-import com.yanyue.rag.domain.agent.v8.AgenticV8Limits;
+import com.yanyue.rag.domain.agent.deep.DeepRagProfiles;
 import com.yanyue.rag.domain.model.PipelineConfig;
 import com.yanyue.rag.domain.port.RunRecordPort;
 import java.nio.charset.StandardCharsets;
@@ -221,140 +220,7 @@ public class JooqRunRecordAdapter implements RunRecordPort {
     }
 
     @Override
-    public void applyAgentHybridRuntime(UUID runId, PipelineConfig config, UUID chatProfileId) {
-        var snapshot = new java.util.LinkedHashMap<String, Object>();
-        snapshot.put("pipelineConfigId", config.id());
-        snapshot.put("pipelineVersion", "agentic-hybrid-v2");
-        snapshot.put("promptVersion", "rewrite-v1+planner-v3+evidence-v2+coverage-v3+gap-v3");
-        snapshot.put("chatProfileId", chatProfileId);
-        snapshot.put("chatModel", profileSnapshot(config.organizationId(), chatProfileId));
-        snapshot.put("queryRewriteProfileId", config.queryRewriteProfileId());
-        snapshot.put("queryRewriteModel", profileSnapshot(config.organizationId(), config.queryRewriteProfileId()));
-        snapshot.put("rerankProfileId", config.rerankProfileId());
-        snapshot.put("rerankModel", profileSnapshot(config.organizationId(), config.rerankProfileId()));
-        snapshot.put("keywordTopK", config.keywordTopK());
-        snapshot.put("semanticTopK", config.semanticTopK());
-        snapshot.put("rrfCandidateLimit", config.rrfCandidateLimit());
-        snapshot.put("rerankCandidateLimit", config.rerankCandidateLimit());
-        snapshot.put("minimumRerankScore", config.minimumRerankScore());
-        snapshot.put("maxRetrievalRounds", config.maxRetrievalRounds());
-        snapshot.put("maxSubQueries", Math.min(6, config.maxSubQueries()));
-        snapshot.put("maxSearchCalls", config.maxSearchCalls());
-        snapshot.put("maxDeepReadCalls", config.maxDeepReadCalls());
-        snapshot.put("maxParallelism", 4);
-        snapshot.put("maxFinalReferences", config.maxFinalReferences());
-        snapshot.put("recentTurns", config.recentTurns());
-        snapshot.put("llmTimeoutSeconds", config.llmTimeoutSeconds());
-        snapshot.put("agenticLoopTimeoutSeconds", config.agenticLoopTimeoutSeconds());
-        snapshot.put("retrievalLoopTimeoutSeconds", config.agenticLoopTimeoutSeconds());
-        snapshot.put("fastTimeoutSeconds", config.fastTimeoutSeconds());
-        dsl.execute("""
-                UPDATE rag_run
-                SET pipeline_config_id = ?, model_profile_id = ?, query_rewrite_profile_id = ?,
-                    rerank_profile_id = ?, pipeline_version = 'agentic-hybrid-v2',
-                    prompt_version = 'rewrite-v1+planner-v3+evidence-v2+coverage-v3+gap-v3', runtime_snapshot = ?::jsonb
-                WHERE id = ?
-                """, config.id(), chatProfileId, config.queryRewriteProfileId(), config.rerankProfileId(),
-                json(snapshot), runId);
-    }
-
-    @Override
-    public void applyAgentV4Runtime(UUID runId, PipelineConfig config, UUID chatProfileId) {
-        var snapshot = new java.util.LinkedHashMap<String, Object>();
-        snapshot.put("pipelineConfigId", config.id());
-        snapshot.put("pipelineVersion", "agentic-rag-v4");
-        snapshot.put("checkpointVersion", 3);
-        snapshot.put("promptVersion", "agentic-v4-request-analysis+deep-read+evidence-judge+answer-v2");
-        snapshot.put("chatProfileId", chatProfileId);
-        snapshot.put("chatModel", profileSnapshot(config.organizationId(), chatProfileId));
-        snapshot.put("rerankProfileId", config.rerankProfileId());
-        snapshot.put("rerankModel", profileSnapshot(config.organizationId(), config.rerankProfileId()));
-        snapshot.put("maximumGoals", 3);
-        snapshot.put("maximumRepairRounds", 1);
-        snapshot.put("maximumPhysicalSearches", 9);
-        snapshot.put("maximumDeepReadCalls", 6);
-        snapshot.put("maximumJudgeCalls", 1);
-        snapshot.put("maximumGenerativeCalls", 9);
-        snapshot.put("maximumModelAttempts", 12);
-        snapshot.put("deadlineSeconds", Math.min(120, Math.max(90, config.agenticLoopTimeoutSeconds())));
-        snapshot.put("keywordTopK", Math.min(12, config.keywordTopK()));
-        snapshot.put("semanticTopK", Math.min(12, config.semanticTopK()));
-        snapshot.put("maxFinalReferences", Math.min(8, config.maxFinalReferences()));
-        dsl.execute("""
-                UPDATE rag_run
-                SET pipeline_config_id = ?, model_profile_id = ?, rerank_profile_id = ?,
-                    pipeline_version = 'agentic-rag-v4',
-                    prompt_version = 'agentic-v4-request-analysis+deep-read+evidence-judge+answer-v2',
-                    runtime_snapshot = ?::jsonb
-                WHERE id = ?
-                """, config.id(), chatProfileId, config.rerankProfileId(), json(snapshot), runId);
-    }
-
-    @Override
-    public void applyAgentV5Runtime(
-            UUID runId,
-            PipelineConfig config,
-            UUID chatProfileId,
-            java.util.Map<String, Object> effectiveLimits
-    ) {
-        var snapshot = new java.util.LinkedHashMap<String, Object>();
-        snapshot.put("pipelineConfigId", config.id());
-        snapshot.put("pipelineVersion", "agentic-rag-v5");
-        snapshot.put("checkpointVersion", 4);
-        snapshot.put("effectiveLimitsVersion", 1);
-        snapshot.put("promptVersion", "agentic-v5-request-analysis+deep-read+evidence-judge+answer-v2");
-        snapshot.put("chatProfileId", chatProfileId);
-        snapshot.put("chatModel", profileSnapshot(config.organizationId(), chatProfileId));
-        snapshot.put("rerankProfileId", config.rerankProfileId());
-        snapshot.put("rerankModel", profileSnapshot(config.organizationId(), config.rerankProfileId()));
-        snapshot.putAll(java.util.Map.copyOf(effectiveLimits));
-        dsl.execute("""
-                UPDATE rag_run
-                SET pipeline_config_id = ?, model_profile_id = ?, rerank_profile_id = ?,
-                    pipeline_version = 'agentic-rag-v5',
-                    prompt_version = 'agentic-v5-request-analysis+deep-read+evidence-judge+answer-v2',
-                    runtime_snapshot = ?::jsonb
-                WHERE id = ?
-                """, config.id(), chatProfileId, config.rerankProfileId(), json(snapshot), runId);
-    }
-
-    @Override
-    public void applyAgentV7Runtime(
-            UUID runId,
-            PipelineConfig config,
-            UUID chatProfileId,
-            java.util.Map<String, Object> effectiveLimits
-    ) {
-        var snapshot = new java.util.LinkedHashMap<String, Object>();
-        snapshot.put("pipelineConfigId", config.id());
-        snapshot.put("pipelineVersion", "agentic-rag-v7");
-        // v7 currently reuses the existing agent checkpoint storage schema. Keep
-        // the runtime snapshot consistent with the adapter until a dedicated v7
-        // recovery adapter and migration are introduced.
-        snapshot.put("checkpointVersion", 3);
-        snapshot.put("rankingSchemaVersion", 3);
-        snapshot.put("rankingPolicy", "EVIDENCE_BOOLEAN_GOAL_BALANCED_V2");
-        snapshot.put("coverageSchemaVersion", 4);
-        snapshot.put("effectiveLimitsVersion", 3);
-        snapshot.put("limitsVersion", AgenticV7Limits.VERSION);
-        snapshot.put("promptVersion", "agentic-v7-request-analysis-v1+deep-read+evidence-judge+answer-v6");
-        snapshot.put("chatProfileId", chatProfileId);
-        snapshot.put("chatModel", profileSnapshot(config.organizationId(), chatProfileId));
-        snapshot.put("rerankProfileId", config.rerankProfileId());
-        snapshot.put("rerankModel", profileSnapshot(config.organizationId(), config.rerankProfileId()));
-        snapshot.putAll(java.util.Map.copyOf(effectiveLimits));
-        dsl.execute("""
-                UPDATE rag_run
-                SET pipeline_config_id = ?, model_profile_id = ?, rerank_profile_id = ?,
-                    pipeline_version = 'agentic-rag-v7',
-                    prompt_version = 'agentic-v7-request-analysis-v1+deep-read+evidence-judge+answer-v6',
-                    runtime_snapshot = ?::jsonb
-                WHERE id = ?
-                """, config.id(), chatProfileId, config.rerankProfileId(), json(snapshot), runId);
-    }
-
-    @Override
-    public void applyAgentV8Runtime(
+    public void applyDeepRuntime(
             UUID runId,
             PipelineConfig config,
             UUID chatProfileId,
@@ -363,13 +229,13 @@ public class JooqRunRecordAdapter implements RunRecordPort {
     ) {
         var snapshot = new java.util.LinkedHashMap<String, Object>();
         snapshot.put("pipelineConfigId", config.id());
-        snapshot.put("pipelineVersion", "agentic-rag-v8");
+        snapshot.put("pipelineVersion", "deep-rag-final");
         snapshot.put("checkpointVersion", 3);
         snapshot.put("rankingSchemaVersion", 3);
         snapshot.put("rankingPolicy", "EVIDENCE_BOOLEAN_GOAL_BALANCED_V2");
         snapshot.put("coverageSchemaVersion", 4);
         snapshot.put("effectiveLimitsVersion", 1);
-        snapshot.put("limitsVersion", AgenticV8Limits.VERSION);
+        snapshot.put("limitsVersion", DeepRagProfiles.VERSION);
         snapshot.put("promptVersion", promptVersion);
         snapshot.put("chatProfileId", chatProfileId);
         snapshot.put("chatModel", profileSnapshot(config.organizationId(), chatProfileId));
@@ -379,7 +245,7 @@ public class JooqRunRecordAdapter implements RunRecordPort {
         dsl.execute("""
                 UPDATE rag_run
                 SET pipeline_config_id = ?, model_profile_id = ?, rerank_profile_id = ?,
-                    pipeline_version = 'agentic-rag-v8',
+                    pipeline_version = 'deep-rag-final',
                     prompt_version = ?,
                     runtime_snapshot = ?::jsonb
                 WHERE id = ?

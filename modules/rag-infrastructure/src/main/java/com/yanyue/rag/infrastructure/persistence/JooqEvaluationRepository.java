@@ -770,7 +770,8 @@ public class JooqEvaluationRepository implements EvaluationRepository {
                 SELECT pipeline_version FROM rag_run WHERE id = ? AND organization_id = ?
                 """, ragRunId, organizationId)
                 .map(record -> record.get("pipeline_version", String.class)).orElse("");
-        if ("agentic-rag-v7".equals(pipelineVersion) || "agentic-rag-v8".equals(pipelineVersion)) {
+        if (java.util.Set.of("agentic-rag-v7", "agentic-rag-v8", "deep-rag-final")
+                .contains(pipelineVersion)) {
             return findAgentV7Candidates(organizationId, ragRunId);
         }
         if ("agentic-rag-v5".equals(pipelineVersion)) {
@@ -995,7 +996,7 @@ public class JooqEvaluationRepository implements EvaluationRepository {
                                PARTITION BY candidate.run_id, candidate.goal_id
                                ORDER BY
                                         CASE
-                                            WHEN candidate.pipeline_version = 'agentic-rag-v8'
+                                            WHEN candidate.pipeline_version IN ('agentic-rag-v8', 'deep-rag-final')
                                                 THEN CASE
                                                     WHEN candidate.has_active_evidence
                                                          OR candidate.best_rerank_rank <= candidate.rerank_limit THEN 0
@@ -1130,8 +1131,11 @@ public class JooqEvaluationRepository implements EvaluationRepository {
         }
         if ("agentic-rag-v8".equals(pipelineVersion)) {
             var diagnostics = new LinkedHashMap<>(findAgentV7Diagnostics(organizationId, ragRunId));
-            diagnostics.put("pipelineVersion", "agentic-rag-v8");
+            diagnostics.put("pipelineVersion", pipelineVersion);
             return diagnostics;
+        }
+        if ("deep-rag-final".equals(pipelineVersion)) {
+            return findDeepFinalDiagnostics(organizationId, ragRunId);
         }
         if ("agentic-rag-v5".equals(pipelineVersion)) {
             return findAgentV5Diagnostics(organizationId, ragRunId);
@@ -1366,6 +1370,43 @@ public class JooqEvaluationRepository implements EvaluationRepository {
     private Map<String, Object> findAgentV5Diagnostics(UUID organizationId, UUID ragRunId) {
         var result = new LinkedHashMap<>(findVersionedAgentDiagnostics(
                 organizationId, ragRunId, "agentic-v5", 4));
+        addGoalRankedCandidateDiagnostics(result, organizationId, ragRunId);
+        result.put("retrievalRankingSource", "agent_goal_ranked_candidate");
+        result.put("retrievalProjection", "GOAL_PHASE_RRF_BALANCED");
+        return Map.copyOf(result);
+    }
+
+    private Map<String, Object> findDeepFinalDiagnostics(UUID organizationId, UUID ragRunId) {
+        var result = new LinkedHashMap<>(findVersionedAgentDiagnostics(
+                organizationId, ragRunId, "deep", 3));
+        dsl.fetchOptional("""
+                SELECT count(*) FILTER (WHERE call.operation LIKE 'deep-request-analysis%') AS planner_calls,
+                       count(*) FILTER (WHERE call.operation LIKE 'deep-%read%') AS deep_read_calls,
+                       count(*) FILTER (WHERE call.operation LIKE 'deep-evidence-judge%') AS judge_calls,
+                       count(*) FILTER (WHERE call.operation LIKE 'deep-final-answer%') AS final_answer_calls
+                FROM agent_model_logical_call call
+                JOIN rag_run run ON run.id = call.run_id
+                WHERE call.run_id = ? AND run.organization_id = ?
+                """, ragRunId, organizationId).ifPresent(record -> {
+            result.put("plannerCallCount", count(record, "planner_calls"));
+            result.put("deepReadCallCount", count(record, "deep_read_calls"));
+            result.put("judgeCallCount", count(record, "judge_calls"));
+            result.put("finalAnswerCallCount", count(record, "final_answer_calls"));
+        });
+        addGoalRankedCandidateDiagnostics(result, organizationId, ragRunId);
+        result.put("retrievalRankingSource", "agent_goal_ranked_candidate");
+        result.put("retrievalProjection", "EVIDENCE_BOOLEAN_GOAL_BALANCED_V2");
+        result.put("rankingPolicy", "EVIDENCE_BOOLEAN_GOAL_BALANCED_V2");
+        result.put("rankingSchemaVersion", 3);
+        result.put("pipelineVersion", "deep-rag-final");
+        return Map.copyOf(result);
+    }
+
+    private void addGoalRankedCandidateDiagnostics(
+            Map<String, Object> result,
+            UUID organizationId,
+            UUID ragRunId
+    ) {
         dsl.fetchOptional("""
                 SELECT count(*) AS ranked_candidates,
                        count(DISTINCT candidate.goal_id) AS ranked_goals,
@@ -1384,9 +1425,6 @@ public class JooqEvaluationRepository implements EvaluationRepository {
             result.put("rerankFallbackCandidateCount", count(record, "rerank_fallback_candidates"));
             result.put("selectedForParentCandidateCount", count(record, "selected_for_parent"));
         });
-        result.put("retrievalRankingSource", "agent_goal_ranked_candidate");
-        result.put("retrievalProjection", "GOAL_PHASE_RRF_BALANCED");
-        return Map.copyOf(result);
     }
 
     private Map<String, Object> findAgentHybridDiagnostics(UUID organizationId, UUID ragRunId) {

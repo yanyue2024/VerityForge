@@ -1081,7 +1081,7 @@ def validate_dataset(output: Path) -> None:
 
 def write_readme(output: Path, manifest: list[dict[str, Any]]) -> None:
     size = sum((output / entry["relativePath"]).stat().st_size for entry in manifest)
-    content = f"""# 中文企业技术知识库多格式 RAG 数据集 v1
+    content = f"""# 中文企业技术知识库 v1
 
 该数据集包含 200 篇内容互不重复的公开许可中文企业技术文档，PDF、DOCX、HTML、Markdown 各 50 篇，
 以及 440 条带标准答案、目标文档别名和原文证据的 RAG 评测题。

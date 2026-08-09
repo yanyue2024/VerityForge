@@ -21,7 +21,7 @@ Any public quotation or educational reference must identify VerityForge and
 link to the original repository. Separate third-party works, dependencies,
 and datasets included with or referenced by this repository remain governed by
 their own licenses and notices. In particular, see THIRD_PARTY_NOTICES.md and
-test_data/RAG-Multi-Corpus/LICENSE.
+the source-specific notices in data/chinese-enterprise-rag-v1/licenses/.
 
 The Materials are provided "AS IS", without warranty of any kind, express or
 implied, including but not limited to the warranties of merchantability,

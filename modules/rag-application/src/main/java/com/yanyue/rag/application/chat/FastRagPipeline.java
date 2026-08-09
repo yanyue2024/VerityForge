@@ -2,14 +2,12 @@ package com.yanyue.rag.application.chat;
 
 import com.yanyue.rag.contract.chat.CreateRunRequest;
 import com.yanyue.rag.contract.chat.StreamEventType;
-import com.yanyue.rag.application.chat.v8.ConversationalAnswerService;
-import com.yanyue.rag.application.chat.v8.KnowledgeDemandClassifier;
 import com.yanyue.rag.application.pipeline.AssistantProfileService;
 import com.yanyue.rag.application.pipeline.PipelineConfigService;
 import com.yanyue.rag.application.knowledge.MetadataSchemaService;
 import com.yanyue.rag.application.telemetry.RagTelemetry;
-import com.yanyue.rag.domain.agent.v4.AgentBudgetLedger;
-import com.yanyue.rag.domain.agent.v8.AgenticV8Limits;
+import com.yanyue.rag.domain.agent.budget.AgentBudgetLedger;
+import com.yanyue.rag.domain.agent.budget.AnswerBudgetLimits;
 import com.yanyue.rag.domain.model.AssistantProfile;
 import com.yanyue.rag.domain.port.ConversationMemoryPort;
 import com.yanyue.rag.domain.port.CitationPort;
@@ -44,6 +42,8 @@ public class FastRagPipeline {
     private static final int ROUTING_KEYWORD_TOP_K = 30;
     private static final int ROUTING_SEMANTIC_TOP_K = 30;
     private static final int ROUTING_RRF_LIMIT = 40;
+    private static final int CONVERSATIONAL_MAX_ATTEMPTS = 3;
+    private static final int CONVERSATIONAL_MAX_OUTPUT_TOKENS = 2_500;
     private final RetrievalPort retrieval;
     private final QueryRewriteModelPort queryRewrite;
     private final RerankModelPort rerank;
@@ -428,11 +428,13 @@ public class FastRagPipeline {
             ConversationalAnswerService.KnowledgeDemand demand,
             ConversationalAnswerService.RetrievalHealth health
     ) {
-        var limits = AgenticV8Limits.defaults();
+        var limits = new AnswerBudgetLimits(Duration.ofSeconds(timeoutSeconds),
+                CONVERSATIONAL_MAX_ATTEMPTS, CONVERSATIONAL_MAX_OUTPUT_TOKENS);
         var ledger = new AgentBudgetLedger(limits, clock.instant());
         runRecords.markRetrievalHealth(runId, health.name(), 0);
         var result = conversationalAnswers.answer(runId, conversationId, question, standaloneQuery,
-                chatProfileId, assistant, recent, temperature, timeoutSeconds, ledger, limits, demand, health);
+                chatProfileId, assistant, recent, temperature, timeoutSeconds, ledger,
+                CONVERSATIONAL_MAX_OUTPUT_TOKENS, demand, health);
         runRecords.markAnswerMode(runId, result.answerMode(), "COMPLETED_WITHOUT_EVIDENCE");
         return result.answer();
     }

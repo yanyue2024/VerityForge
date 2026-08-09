@@ -32,5 +32,7 @@ model-sidecar/.ruff_cache/
 model-sidecar/__pycache__/
 model-sidecar/**/*.pyc
 
-data/
+data/*
+!data/chinese-enterprise-rag-v1/
+!data/chinese-enterprise-rag-v1/**
 tmp/

@@ -11,15 +11,12 @@ import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import com.yanyue.rag.application.pipeline.PipelineConfigService;
+import com.yanyue.rag.application.chat.deep.DeepRagPipeline;
 import com.yanyue.rag.application.telemetry.RagTelemetry;
 import com.yanyue.rag.contract.chat.CreateRunRequest;
 import com.yanyue.rag.contract.chat.KnowledgeScope;
 import com.yanyue.rag.contract.chat.RunMode;
 import com.yanyue.rag.contract.chat.StreamEventType;
-import com.yanyue.rag.domain.model.PipelineConfig;
-import com.yanyue.rag.domain.port.AgentReactPersistencePort;
-import com.yanyue.rag.domain.port.AgentRecoveryPort;
 import com.yanyue.rag.domain.port.RunRecordPort;
 import com.yanyue.rag.domain.port.RetrievalHit;
 import java.time.Instant;
@@ -35,46 +32,32 @@ class RunCoordinatorTest {
         var organizationId = UUID.randomUUID();
         var userId = UUID.randomUUID();
         var conversationId = UUID.randomUUID();
-        var chatProfileId = UUID.randomUUID();
         var now = Instant.parse("2026-07-21T00:00:00Z");
-        var config = new PipelineConfig(
-                UUID.randomUUID(), organizationId, "test", "fast-rag-v2", "test-prompts",
-                chatProfileId, UUID.randomUUID(), UUID.randomUUID(),
-                10, 10, 20, 8, 8, 8_000, 0.2, 30,
-                true, now, now);
-        var configs = mock(PipelineConfigService.class);
-        when(configs.resolve(organizationId, null)).thenReturn(config);
-        var reasoner = mock(AgentStructuredReasoner.class);
         var query = "请综合分析多个制度之间的适用条件、差异、潜在冲突，并分别给出每一项判断所依据的条款。";
-        when(reasoner.classify(chatProfileId, query))
-                .thenReturn(new AgentStructuredReasoner.IntentDecision(RunMode.DEEP, "multi-intent"));
         var runRecords = mock(RunRecordPort.class);
-        var agentic = mock(AgenticRagPipeline.class);
+        var deep = mock(DeepRagPipeline.class);
         var events = mock(RunEventHub.class);
         var fast = mock(FastRagPipeline.class);
-        when(agentic.execute(any(), eq(conversationId), eq(organizationId), eq(userId), any()))
+        when(deep.execute(any(), eq(conversationId), eq(organizationId), eq(userId), any(), eq(true)))
                 .thenReturn("answer");
         var request = new CreateRunRequest(query, RunMode.AUTO, KnowledgeScope.all(), List.of(), null);
         when(fast.prepareRouting(organizationId, userId, request)).thenReturn(new FastRagPipeline.RoutingPreflight(
                 query, List.of(), List.of(), List.of(), now, 0));
         try (var executor = Executors.newSingleThreadExecutor()) {
             var coordinator = new RunCoordinator(
-                    fast, agentic, events, executor,
-                    runRecords, configs, reasoner, mock(AgentRecoveryPort.class),
-                    mock(AgentReactPersistencePort.class), RagTelemetry.noop(), new AutoModeRouter());
+                    fast, deep, events, executor, runRecords, RagTelemetry.noop(), new AutoModeRouter());
 
             var accepted = coordinator.start(organizationId, userId, conversationId, request);
 
             verify(runRecords, timeout(2_000)).complete(accepted.runId());
-            var ordered = inOrder(runRecords, agentic);
+            var ordered = inOrder(runRecords, deep);
             ordered.verify(runRecords).create(
                     accepted.runId(), organizationId, userId, conversationId, request);
             ordered.verify(runRecords).markRouting(accepted.runId());
             ordered.verify(runRecords).markRunning(accepted.runId(), RunMode.DEEP);
-            ordered.verify(agentic).execute(
-                    accepted.runId(), conversationId, organizationId, userId, request);
+            ordered.verify(deep).execute(
+                    accepted.runId(), conversationId, organizationId, userId, request, true);
             ordered.verify(runRecords).complete(accepted.runId());
-            verify(reasoner, never()).classify(any(), any());
             verify(events, timeout(2_000)).publish(accepted.runId(), StreamEventType.ROUTE_SELECTED,
                     java.util.Map.of(
                             "requested", RunMode.AUTO,
@@ -93,27 +76,15 @@ class RunCoordinatorTest {
     @Test
     void autoUsesLocalRouterWithoutCallingStructuredRouter() {
         var organizationId = UUID.randomUUID();
-        var chatProfileId = UUID.randomUUID();
         var now = Instant.parse("2026-07-21T00:00:00Z");
-        var config = new PipelineConfig(
-                UUID.randomUUID(), organizationId, "test", "fast-rag-v2", "test-prompts",
-                chatProfileId, UUID.randomUUID(), UUID.randomUUID(),
-                10, 10, 20, 8, 8, 8_000, 0.2, 30,
-                true, now, now);
-        var configs = mock(PipelineConfigService.class);
-        when(configs.resolve(organizationId, null)).thenReturn(config);
-        var reasoner = mock(AgentStructuredReasoner.class);
         var query = "请综合分析多个制度之间的适用条件、差异、潜在冲突，并分别给出每一项判断所依据的条款。";
-        when(reasoner.classify(chatProfileId, query)).thenThrow(new IllegalStateException("router unavailable"));
         var fast = mock(FastRagPipeline.class);
         var request = new CreateRunRequest(query, RunMode.AUTO, KnowledgeScope.all(), List.of(), null);
         when(fast.prepareRouting(eq(organizationId), eq(null), eq(request))).thenReturn(
                 new FastRagPipeline.RoutingPreflight(query, List.of(), List.of(), List.of(), now, 0));
         var coordinator = new RunCoordinator(
-                fast, mock(AgenticRagPipeline.class), mock(RunEventHub.class),
-                mock(ExecutorService.class), mock(RunRecordPort.class), configs, reasoner,
-                mock(AgentRecoveryPort.class), mock(AgentReactPersistencePort.class), RagTelemetry.noop(),
-                new AutoModeRouter());
+                fast, mock(DeepRagPipeline.class), mock(RunEventHub.class),
+                mock(ExecutorService.class), mock(RunRecordPort.class), RagTelemetry.noop(), new AutoModeRouter());
 
         var selection = coordinator.selectMode(organizationId, request);
 
@@ -123,17 +94,13 @@ class RunCoordinatorTest {
         assertEquals("HEURISTIC", selection.decisionSource());
         assertEquals(List.of("MULTI_GOAL", "SYNTHESIS", "COMPARISON", "CONFLICT"), selection.signals());
         assertEquals(0, selection.titleHitCount());
-        verify(reasoner, never()).classify(any(), any());
     }
 
     @Test
     void autoCanSelectFastThroughLocalRouter() {
-        var reasoner = mock(AgentStructuredReasoner.class);
         var coordinator = new RunCoordinator(
-                mock(FastRagPipeline.class), mock(AgenticRagPipeline.class), mock(RunEventHub.class),
-                mock(ExecutorService.class), mock(RunRecordPort.class), mock(PipelineConfigService.class), reasoner,
-                mock(AgentRecoveryPort.class), mock(AgentReactPersistencePort.class), RagTelemetry.noop(),
-                new AutoModeRouter());
+                mock(FastRagPipeline.class), mock(DeepRagPipeline.class), mock(RunEventHub.class),
+                mock(ExecutorService.class), mock(RunRecordPort.class), RagTelemetry.noop(), new AutoModeRouter());
         var request = new CreateRunRequest(
                 "ResourceClaimSpec 的作用是什么？", RunMode.AUTO, KnowledgeScope.all(), List.of(), null);
 
@@ -143,17 +110,14 @@ class RunCoordinatorTest {
         assertEquals("auto-fast-technical-anchor", selection.reason());
         assertEquals("HEURISTIC", selection.decisionSource());
         assertEquals(List.of("STABLE_TECHNICAL_ANCHOR"), selection.signals());
-        verify(reasoner, never()).classify(any(), any());
     }
 
     @Test
     void explicitModesRemainUserOverridesWithoutCallingRouter() {
         var router = mock(AutoModeRouter.class);
         var coordinator = new RunCoordinator(
-                mock(FastRagPipeline.class), mock(AgenticRagPipeline.class), mock(RunEventHub.class),
-                mock(ExecutorService.class), mock(RunRecordPort.class), mock(PipelineConfigService.class),
-                mock(AgentStructuredReasoner.class), mock(AgentRecoveryPort.class),
-                mock(AgentReactPersistencePort.class), RagTelemetry.noop(), router);
+                mock(FastRagPipeline.class), mock(DeepRagPipeline.class), mock(RunEventHub.class),
+                mock(ExecutorService.class), mock(RunRecordPort.class), RagTelemetry.noop(), router);
 
         for (var mode : List.of(RunMode.FAST, RunMode.DEEP)) {
             var request = new CreateRunRequest("任意问题", mode, KnowledgeScope.all(), List.of(), null);
@@ -183,20 +147,18 @@ class RunCoordinatorTest {
         when(fast.execute(any(), eq(conversationId), eq(organizationId), eq(userId), eq(request), eq(preflight)))
                 .thenReturn("answer");
         var runRecords = mock(RunRecordPort.class);
-        var agentic = mock(AgenticRagPipeline.class);
+        var deep = mock(DeepRagPipeline.class);
 
         try (var executor = Executors.newSingleThreadExecutor()) {
-            var coordinator = new RunCoordinator(fast, agentic, mock(RunEventHub.class), executor,
-                    runRecords, mock(PipelineConfigService.class), mock(AgentStructuredReasoner.class),
-                    mock(AgentRecoveryPort.class), mock(AgentReactPersistencePort.class), RagTelemetry.noop(),
-                    new AutoModeRouter());
+            var coordinator = new RunCoordinator(fast, deep, mock(RunEventHub.class), executor,
+                    runRecords, RagTelemetry.noop(), new AutoModeRouter());
 
             var accepted = coordinator.start(organizationId, userId, conversationId, request);
 
             verify(runRecords, timeout(2_000)).complete(accepted.runId());
             verify(fast).prepareRouting(organizationId, userId, request);
             verify(fast).execute(accepted.runId(), conversationId, organizationId, userId, request, preflight);
-            verify(agentic, never()).execute(any(), any(), any(), any(), any());
+            verify(deep, never()).execute(any(), any(), any(), any(), any(), eq(true));
         }
     }
 
@@ -209,10 +171,8 @@ class RunCoordinatorTest {
         when(fast.prepareRouting(organizationId, null, request))
                 .thenThrow(new IllegalStateException("retrieval unavailable"));
         var coordinator = new RunCoordinator(
-                fast, mock(AgenticRagPipeline.class), mock(RunEventHub.class), mock(ExecutorService.class),
-                mock(RunRecordPort.class), mock(PipelineConfigService.class), mock(AgentStructuredReasoner.class),
-                mock(AgentRecoveryPort.class), mock(AgentReactPersistencePort.class), RagTelemetry.noop(),
-                new AutoModeRouter());
+                fast, mock(DeepRagPipeline.class), mock(RunEventHub.class), mock(ExecutorService.class),
+                mock(RunRecordPort.class), RagTelemetry.noop(), new AutoModeRouter());
 
         var selection = coordinator.selectMode(organizationId, request);
 
@@ -229,14 +189,12 @@ class RunCoordinatorTest {
         var userId = UUID.randomUUID();
         var conversationId = UUID.randomUUID();
         var runRecords = mock(RunRecordPort.class);
-        var agentic = mock(AgenticRagPipeline.class);
-        when(agentic.execute(any(), eq(conversationId), eq(organizationId), eq(userId), any()))
+        var deep = mock(DeepRagPipeline.class);
+        when(deep.execute(any(), eq(conversationId), eq(organizationId), eq(userId), any(), eq(true)))
                 .thenThrow(new IllegalStateException("Run Deadline 已耗尽"));
         try (var executor = Executors.newSingleThreadExecutor()) {
-            var coordinator = new RunCoordinator(mock(FastRagPipeline.class), agentic, mock(RunEventHub.class),
-                    executor, runRecords, mock(PipelineConfigService.class), mock(AgentStructuredReasoner.class),
-                    mock(AgentRecoveryPort.class), mock(AgentReactPersistencePort.class), RagTelemetry.noop(),
-                    new AutoModeRouter());
+            var coordinator = new RunCoordinator(mock(FastRagPipeline.class), deep, mock(RunEventHub.class),
+                    executor, runRecords, RagTelemetry.noop(), new AutoModeRouter());
             var request = new CreateRunRequest("复杂问题", RunMode.DEEP, KnowledgeScope.all(), List.of(), null);
 
             var accepted = coordinator.start(organizationId, userId, conversationId, request);

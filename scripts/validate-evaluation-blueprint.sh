@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BLUEPRINT="${1:-${ROOT_DIR}/benchmarks/yanyue-operations-v1.blueprint.json}"
+BLUEPRINT="${1:-${ROOT_DIR}/benchmarks/chinese-enterprise-rag-v1.blueprint.json}"
 
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 [[ -f "${BLUEPRINT}" ]] || { echo "Blueprint not found: ${BLUEPRINT}" >&2; exit 1; }

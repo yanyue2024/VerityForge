@@ -1,38 +1,60 @@
-# VerityForge Showcase
+# VerityForge 桌面展示素材
 
-This directory contains the stable visual entry points for the VerityForge portfolio release. The public target is the desktop web experience at `1440x900` or larger.
+这里保存公开作品集使用的稳定截图。所有画面来自 [18306 公开 Demo](http://idcmnt1.truesight.com.cn:18306) 的真实桌面 Web、中文企业技术知识库 v1 和专门置顶的展示会话，不使用移动端布局。
 
-## Desktop Assets
+## 核心画面
 
-The screenshots below are generated from deterministic, synthetic browser fixtures so they remain safe to publish and reproducible without a Demo account.
-
-| Asset | Purpose |
+| 文件 | 展示内容 |
 | --- | --- |
-| `chat-desktop.png` | The primary Chat view with a grounded answer and visible citations |
-| `evaluation-desktop.png` | Fast/Deep comparison results and metric cards |
-| `knowledgeops-desktop.png` | Knowledge base, document version, metadata, or index-generation workflow |
-| `verityforge-demo.webm` | A 30-60 second desktop walkthrough, when a stable recording is available |
+| `chat-deep-evidence.png` | Deep 回答、置顶会话、Goal 关联、召回子块和父块证据 |
+| `chat-fast-evidence.png` | Fast 回答、编号引用和子块证据 |
+| `chat-auto-evidence.png` | Auto 实际选择后的回答与证据 |
+| `knowledge-bases.png` | 知识库总览、200 篇文档与 6,201 个子块 |
+| `knowledge-documents.png` | 中文企业技术知识库 v1 的 200 篇文档列表 |
+| `evaluation-fast-deep.png` | Fast / Deep 完整链路对照结果；`V8 FINAL` 为已保存运行的原始审计标签 |
 
-The current repository also contains regression snapshots under `web/tests/workbench.spec.ts-snapshots/`. They are implementation snapshots rather than public showcase assets.
+## 文档工作区
 
-Regenerate the desktop screenshots with:
+| 文件 | 展示内容 |
+| --- | --- |
+| `document-original.png` | 原始资产预览 |
+| `document-parsed.png` | 解析正文和章节目录 |
+| `document-chunks.png` | 子块、Token、章节路径和可展开父块 |
+| `document-metadata.png` | 来源、许可、格式、上游版本和业务 Metadata |
+| `document-processing.png` | 解析、分块、Embedding、发布等处理阶段 |
+
+这些截图保留真实产品密度，不做营销式拼贴。根 README 默认展示 Deep、知识库、Fast、Auto 和评测五张，其余素材放在专题文档中按需展开。
+
+## 重新生成
+
+截图脚本只读取现有页面，不新建对话、不上传文档、不修改置顶状态：
 
 ```bash
-RAG_CAPTURE_SHOWCASE=true \
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/path/to/chrome \
-npm --prefix web run test:e2e -- --project=desktop \
-  --grep='desktop knowledge|desktop chat|evaluation workspace restores'
+RAG_SHOWCASE_BASE_URL=http://idcmnt1.truesight.com.cn:18306 \
+RAG_SHOWCASE_USERNAME='<demo-user>' \
+RAG_SHOWCASE_PASSWORD='<demo-password>' \
+RAG_SHOWCASE_BROWSER_PATH=/usr/bin/google-chrome \
+npm --prefix web run showcase:capture
 ```
 
-## Capture Rules
+也可用短期 Access Token，并由脚本从 JWT Claim 读取用户、组织、角色和有效期：
 
-- Capture desktop web only; do not include mobile layouts in this release.
-- Use synthetic documents and conversations that are safe to publish.
-- Remove hostnames, ports other than the published demo link, usernames, internal IDs, token counts tied to private accounts, model credentials, and filesystem paths unless they are already part of the public benchmark explanation.
-- Keep the browser chrome out of the image and use a consistent viewport and light theme.
-- Prefer one useful state per image over a collage of tiny panels.
-- Add a short alt text and link each image to the relevant design or benchmark document.
+```bash
+RAG_SHOWCASE_BASE_URL=http://idcmnt1.truesight.com.cn:18306 \
+RAG_SHOWCASE_ACCESS_TOKEN='<short-lived-token>' \
+RAG_SHOWCASE_DISPLAY_NAME='<display-name>' \
+RAG_SHOWCASE_BROWSER_PATH=/usr/bin/google-chrome \
+npm --prefix web run showcase:capture
+```
 
-## Demo Boundary
+输出目录默认是 `docs/showcase`，可用 `RAG_SHOWCASE_OUTPUT_DIR` 覆盖。固定视口为 2048x1080、浅色主题、Reduced Motion，浏览器外框不会进入图片。
 
-The live preview currently points to `http://idcmnt1.truesight.com.cn:18306`. It is shared and HTTP-only, so it must not be used for private information or production credentials. Screenshots and video remain the canonical portfolio presentation when the endpoint is unavailable.
+## 发布边界
+
+- 只展示桌面 Web，不维护移动端作品截图。
+- Demo 是共享 HTTP 环境，可能维护或更新；不要上传私密文档、生产凭据或执行压力测试。
+- 截图不能包含 API Key、JWT、密码、内部文件路径或未公开组织数据。
+- 展示会话与知识库内容必须来自已公开许可语料。
+- 评测画面如实保留已保存运行的标签；`V8 FINAL` 仅标识产生报告的原始运行，公开源码中的同一最终实现已收束为 `deep-rag-final`。
+- 发布 GitHub 仓库不更新、重启或替换 18306 的现有构建。
+- Demo 不可用时，以仓库截图和评测报告为稳定作品证据。

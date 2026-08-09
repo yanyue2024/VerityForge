@@ -56,7 +56,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class QuestionSuggestionService {
-    static final String STRATEGY_VERSION = "question-suggestions-v4-auto-routed-benchmark";
+    static final String STRATEGY_VERSION = "question-suggestions-auto-routed-final";
     private static final Duration BATCH_CACHE_TTL = Duration.ofHours(24);
     private static final Duration CATALOG_TTL = Duration.ofDays(7);
     private static final int MAXIMUM_CONTEXT_DOCUMENTS = 20;
